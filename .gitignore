@@ -1,0 +1,21 @@
+# 临时文件
+*.tmp
+*.log
+*.swp
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# 备份文件
+*.bak
+*.backup
+
+# Claude/OMC runtime state
+.omc/state/
