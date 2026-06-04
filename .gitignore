@@ -17,5 +17,8 @@ Thumbs.db
 *.bak
 *.backup
 
+# API keys (NEVER commit real keys)
+.env
+
 # Claude/OMC runtime state
 .omc/state/

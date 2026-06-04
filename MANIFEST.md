@@ -4,16 +4,27 @@
 
 - **仓库**: haozhengwan/claude_code_settings
 - **生成时间**: 2026-05-27
+- **最后更新**: 2026-06-04
 - **环境**: Linux (CentOS 8, x86_64) + GCC 14 + Python 3.13 + Rust 1.95
 - **Claude Code**: CLI mode, deepseek-v4-pro backend
 
 ## 文件清单
 
+### 根目录
+
+| 文件 | 说明 |
+|------|------|
+| README.md | 项目说明 + 一键部署指南 |
+| restore.sh | **一键部署脚本** (Anaconda → Claude Code → API Key → 配置) |
+| .env.example | API Key 配置模板 (可安全提交, 真实 key 在 .env) |
+| .gitignore | Git 忽略规则 (.env 已排除) |
+| MANIFEST.md | 本文件 |
+
 ### 配置文件 (config/)
 
 | 文件 | 说明 |
 |------|------|
-| settings.json | 全局设置 (7 插件, 3 自定义 marketplaces, dark theme) |
+| settings.json | 全局设置 (7 插件, 3 自定义 marketplaces, dark theme, HUD) |
 | keybindings.json | 键盘快捷键 (空, 使用默认) |
 
 ### 插件信息 (plugins/)
@@ -23,14 +34,15 @@
 | installed_plugins.json | 7 个已安装插件及其版本 |
 | known_marketplaces.json | 4 个 marketplaces 源地址 |
 
-### 根目录
+## restore.sh 部署流程
 
-| 文件 | 说明 |
+| 步骤 | 内容 |
 |------|------|
-| README.md | 项目说明 + 快速恢复指南 |
-| restore.sh | 一键恢复脚本 |
-| .gitignore | Git 忽略规则 |
-| MANIFEST.md | 本文件 |
+| 1/5 | 系统环境检查 (OS, curl, wget, git) |
+| 2/5 | Miniconda 安装 + conda 环境创建 (Python + Node.js) |
+| 3/5 | Claude Code CLI 安装 (npm) |
+| 4/5 | API Key 配置 (交互式创建 .env) |
+| 5/5 | Claude Code 配置文件恢复 |
 
 ## 已安装插件详情
 
