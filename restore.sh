@@ -85,8 +85,25 @@ check_system() {
         fi
     done
 
-    # 检查 git
-    if ! command -v git &>/dev/null; then
+    # 检查 git (系统级, VS Code 等 IDE 需要)
+    # 注意: 即使 conda 环境有 git, 系统级 git 也必须存在供 IDE 使用
+    if [ -x "/usr/bin/git" ]; then
+        ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
+    elif command -v git &>/dev/null; then
+        warn "git 仅在 conda 环境可用, 安装系统级 git (VS Code 需要)..."
+        if command -v apt-get &>/dev/null; then
+            apt-get update -qq && apt-get install -y -qq git
+            ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
+        elif command -v yum &>/dev/null; then
+            yum install -y -q git
+            ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
+        elif command -v dnf &>/dev/null; then
+            dnf install -y -q git
+            ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
+        else
+            warn "无法自动安装系统级 git, 请手动安装"
+        fi
+    else
         warn "git 未安装, 尝试安装..."
         if command -v apt-get &>/dev/null; then
             apt-get update -qq && apt-get install -y -qq git
@@ -95,8 +112,8 @@ check_system() {
         elif command -v dnf &>/dev/null; then
             dnf install -y -q git
         fi
+        ok "git $(git --version 2>/dev/null | awk '{print $NF}')"
     fi
-    ok "git $(git --version 2>/dev/null | awk '{print $NF}')"
 }
 
 # ---- 2. Anaconda/Miniconda 安装 ----
