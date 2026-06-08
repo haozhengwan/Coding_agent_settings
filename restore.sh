@@ -1,9 +1,9 @@
 #!/bin/bash
 # ============================================================
-#  AI CLI 工具一键部署脚本
-#  涵盖: Anaconda → Node.js → Claude Code / Gemini CLI / Codex CLI → API Key → 配置恢复
+#  AI CLI 工具一键部署脚本 (10 步)
+#  涵盖: Anaconda → Node.js → Claude Code / Gemini CLI / Codex CLI → GitHub 认证 → API Key → 配置恢复 → 插件安装
 # ============================================================
-set -e
+set -eo pipefail
 
 # ---- 可配置变量 ----
 CONDA_INSTALL_DIR="${CONDA_INSTALL_DIR:-${HOME}/anaconda3}"
@@ -61,7 +61,7 @@ banner() {
 
 # ---- 1. 系统环境检查 ----
 check_system() {
-    step "1/9" "系统环境检查"
+    step "1/10" "系统环境检查"
 
     OS="$(uname -s)"
     ARCH="$(uname -m)"
@@ -101,7 +101,7 @@ check_system() {
 
 # ---- 2. Anaconda/Miniconda 安装 ----
 install_conda() {
-    step "2/9" "Anaconda/Miniconda 环境"
+    step "2/10" "Anaconda/Miniconda 环境"
 
     # 如果 conda 已存在
     if command -v conda &>/dev/null; then
@@ -168,6 +168,11 @@ install_conda() {
     ok "Node.js $($(conda run -n "${CONDA_ENV_NAME}" which node) --version 2>/dev/null)"
     ok "npm $($(conda run -n "${CONDA_ENV_NAME}" which npm) --version 2>/dev/null)"
 
+    # 安装 git (插件 marketplace 克隆必需)
+    info "在 '${CONDA_ENV_NAME}' 环境中安装 git..."
+    conda install -n "${CONDA_ENV_NAME}" git -c conda-forge -y > /dev/null 2>&1
+    ok "git $(conda run -n "${CONDA_ENV_NAME}" git --version 2>/dev/null)"
+
     # 导出 NODE_PATH 供后续步骤使用
     NODE_BIN="$(conda run -n "${CONDA_ENV_NAME}" which node)"
     NPM_BIN="$(conda run -n "${CONDA_ENV_NAME}" which npm)"
@@ -175,7 +180,7 @@ install_conda() {
 
 # ---- 3. Claude Code CLI 安装 ----
 install_claude_code() {
-    step "3/9" "Claude Code CLI 安装"
+    step "3/10" "Claude Code CLI 安装"
 
     if command -v claude &>/dev/null; then
         ok "claude 已安装: $(claude --version 2>/dev/null || echo 'version check skipped')"
@@ -196,7 +201,7 @@ install_claude_code() {
 
 # ---- 4. Gemini CLI 安装 ----
 install_gemini_cli() {
-    step "4/9""Gemini CLI 安装"
+    step "4/10" "Gemini CLI 安装"
 
     if conda run -n "${CONDA_ENV_NAME}" which gemini &>/dev/null; then
         ok "gemini 已安装: $(conda run -n "${CONDA_ENV_NAME}" gemini --version 2>/dev/null || echo 'version check skipped')"
@@ -216,7 +221,7 @@ install_gemini_cli() {
 
 # ---- 5. Codex CLI 安装 ----
 install_codex_cli() {
-    step "5/9""Codex CLI 安装"
+    step "5/10" "Codex CLI 安装"
 
     if conda run -n "${CONDA_ENV_NAME}" which codex &>/dev/null; then
         ok "codex 已安装: $(conda run -n "${CONDA_ENV_NAME}" codex --version 2>/dev/null || echo 'version check skipped')"
@@ -233,9 +238,131 @@ install_codex_cli() {
         warn "未能检测到 codex 命令, 可能需要重启终端或手动加入 PATH"
     fi
 }
-# ---- 6. API Key 配置 ----
+# ---- 6. GitHub 认证配置 ----
+setup_github_auth() {
+    step "6/10" "GitHub 认证配置 (git + gh CLI + SSH)"
+
+    # 修复 git 安全目录问题 (常见于 root/sudo 场景)
+    info "配置 git 安全目录..."
+    git config --global --add safe.directory "$(pwd)" 2>/dev/null || true
+    git config --global --add safe.directory "${HOME}" 2>/dev/null || true
+    ok "git safe.directory 已配置"
+
+    # 安装 GitHub CLI
+    if command -v gh &>/dev/null; then
+        ok "gh CLI 已安装: $(gh --version 2>/dev/null | head -1)"
+    else
+        info "在 '${CONDA_ENV_NAME}' 环境中安装 GitHub CLI (gh)..."
+        if conda install -n "${CONDA_ENV_NAME}" gh -c conda-forge -y > /dev/null 2>&1; then
+            ok "gh CLI 安装完成: $(conda run -n "${CONDA_ENV_NAME}" gh --version 2>/dev/null | head -1)"
+        else
+            warn "gh CLI 安装失败, 尝试用 pip..."
+            conda run -n "${CONDA_ENV_NAME}" pip install gh 2>/dev/null || warn "gh CLI 安装失败, 请手动安装: https://github.com/cli/cli"
+        fi
+    fi
+
+    # 配置 SSH: 添加 GitHub host key
+    info "配置 GitHub SSH host key..."
+    mkdir -p "${HOME}/.ssh"
+    if ! grep -q "github.com" "${HOME}/.ssh/known_hosts" 2>/dev/null; then
+        ssh-keyscan github.com >> "${HOME}/.ssh/known_hosts" 2>/dev/null
+        ok "GitHub SSH host key 已添加"
+    else
+        ok "GitHub SSH host key 已存在"
+    fi
+
+    # 检测认证状态
+    local AUTH_OK=false
+    local USE_TOKEN=false
+
+    # 方式 1: 环境变量 GITHUB_TOKEN / GH_TOKEN (优先, 无需交互)
+    if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "your-github-token-here" ]; then
+        info "检测到 GITHUB_TOKEN, 配置 gh CLI..."
+        # 设置 GH_TOKEN (gh CLI 也认这个)
+        export GH_TOKEN="${GITHUB_TOKEN}"
+        # 用 token 登录 gh
+        if echo "${GITHUB_TOKEN}" | conda run -n "${CONDA_ENV_NAME}" gh auth login --with-token 2>/dev/null; then
+            ok "GitHub 已通过 GITHUB_TOKEN 认证"
+            USE_TOKEN=true
+            AUTH_OK=true
+        else
+            warn "gh auth login --with-token 失败"
+        fi
+
+        # 配置 git 使用 token 进行 HTTPS 认证
+        info "配置 git credential (HTTPS)..."
+        git config --global credential.helper store 2>/dev/null || true
+        git config --global url."https://oauth2:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/" 2>/dev/null || true
+        ok "git HTTPS credential 已配置"
+    elif [ -n "${GH_TOKEN}" ] && [ "${GH_TOKEN}" != "your-github-token-here" ]; then
+        export GITHUB_TOKEN="${GH_TOKEN}"
+        if echo "${GH_TOKEN}" | conda run -n "${CONDA_ENV_NAME}" gh auth login --with-token 2>/dev/null; then
+            ok "GitHub 已通过 GH_TOKEN 认证"
+            USE_TOKEN=true
+            AUTH_OK=true
+            git config --global url."https://oauth2:${GH_TOKEN}@github.com/".insteadOf "https://github.com/" 2>/dev/null || true
+        fi
+    fi
+
+    # 方式 2: gh CLI 已有认证
+    if [ "${AUTH_OK}" = false ]; then
+        if conda run -n "${CONDA_ENV_NAME}" gh auth status 2>&1 | grep -q "Logged in"; then
+            ok "GitHub 已通过 gh CLI 认证"
+            AUTH_OK=true
+        fi
+    fi
+
+    # 方式 3: SSH 认证
+    if [ "${AUTH_OK}" = false ]; then
+        info "检测 SSH 认证..."
+        if ssh -o BatchMode=yes -o ConnectTimeout=5 -T git@github.com 2>&1 | grep -qE "successfully authenticated|You've successfully authenticated"; then
+            ok "GitHub SSH 认证成功"
+            AUTH_OK=true
+        fi
+    fi
+
+    # 未认证时引导
+    if [ "${AUTH_OK}" = false ]; then
+        warn "GitHub 未认证"
+
+        echo ""
+        echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "  ${YELLOW}  GitHub 认证设置${NC}"
+        echo ""
+        echo -e "  选择一种方式完成认证:"
+        echo ""
+        echo -e "  ${CYAN}方式一 (推荐): gh CLI 浏览器 OAuth 登录${NC}"
+        echo -e "    conda activate ${CONDA_ENV_NAME}"
+        echo -e "    gh auth login"
+        echo ""
+        echo -e "  ${CYAN}方式二: 设置 GITHUB_TOKEN 环境变量${NC}"
+        echo -e "    export GITHUB_TOKEN='your-personal-access-token'"
+        echo -e "    生成: https://github.com/settings/tokens"
+        echo ""
+        echo -e "  ${CYAN}方式三: 配置 SSH Key${NC}"
+        echo -e "    ssh-keygen -t ed25519 -C \"your@email.com\""
+        echo -e "    cat ~/.ssh/id_ed25519.pub  # 添加到 https://github.com/settings/keys"
+        echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        # 交互式询问 (非交互环境自动跳过)
+        read -r -p "  是否已经准备好认证? (y/n, 选 n 跳过): " AUTH_READY 2>/dev/null || AUTH_READY="n"
+        if [ "${AUTH_READY}" = "y" ] || [ "${AUTH_READY}" = "Y" ]; then
+            info "尝试 gh auth login..."
+            conda run -n "${CONDA_ENV_NAME}" gh auth login || {
+                warn "gh auth login 失败, 请稍后手动认证"
+            }
+        else
+            info "跳过 GitHub 认证 (插件安装步骤仍会使用 HTTPS 克隆公开仓库)"
+        fi
+    fi
+
+    ok "GitHub 认证配置完成"
+}
+
+# ---- 7. API Key 配置 ----
 setup_api_key() {
-    step "6/9""API Key 配置 (Claude + Gemini + Codex)"
+    step "7/10" "API Key 配置 (Claude + Gemini + Codex + GitHub)"
 
     if [ ! -f "${ENV_EXAMPLE}" ]; then
         info "创建 .env.example 模板..."
@@ -255,6 +382,12 @@ ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
 CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
+
+# ---- GitHub 认证 ----
+# 用于 gh CLI 认证 + git push/pull (无需浏览器 OAuth)
+# 生成: https://github.com/settings/tokens → Generate new token (classic)
+# 权限: repo, workflow (根据需要勾选)
+GITHUB_TOKEN=your-github-token-here
 
 # ---- Gemini CLI ----
 # 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
@@ -307,11 +440,12 @@ EOF
         echo -e "    DeepSeek:  ${CYAN}https://platform.deepseek.com/api_keys${NC}"
         echo -e "    Gemini:    ${CYAN}https://aistudio.google.com/apikey${NC}"
         echo -e "    OpenAI:    ${CYAN}https://platform.openai.com/api-keys${NC}"
+        echo -e "    GitHub:    ${CYAN}https://github.com/settings/tokens${NC}"
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         echo ""
 
         # 询问是否现在创建 .env
-        read -r -p "  是否现在创建 .env 文件? (y/n): " CREATE_ENV
+        read -r -p "  是否现在创建 .env 文件? (y/n): " CREATE_ENV 2>/dev/null || CREATE_ENV="n"
         if [ "${CREATE_ENV}" = "y" ] || [ "${CREATE_ENV}" = "Y" ]; then
             cp "${ENV_EXAMPLE}" "${ENV_FILE}"
             ok ".env 已从模板创建: ${ENV_FILE}"
@@ -324,7 +458,7 @@ EOF
 
 # ---- 7. 环境变量加载 (从 .env 文件) ----
 load_env_vars() {
-    step "7/9""加载环境变量"
+    step "8/10" "加载环境变量"
 
     if [ -f "${ENV_FILE}" ]; then
         info "从 ${ENV_FILE} 加载配置..."
@@ -357,6 +491,14 @@ load_env_vars() {
         else
             warn "OPENAI_API_KEY 未设置或仍是占位符"
         fi
+
+        # GitHub Token
+        if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "your-github-token-here" ]; then
+            ok "GitHub Token 已配置"
+            export GH_TOKEN="${GITHUB_TOKEN}"
+        else
+            warn "GITHUB_TOKEN 未设置或仍是占位符 (插件安装不受影响, 但 git push 需要)"
+        fi
     else
         warn ".env 文件不存在, 跳过环境变量加载"
         info "稍后请执行: source .env"
@@ -365,7 +507,7 @@ load_env_vars() {
 
 # ---- 8. Claude Code 插件自动安装 ----
 install_plugins() {
-    step "8/9" "Claude Code 插件自动安装"
+    step "10/10" "Claude Code 插件自动安装"
 
     CLAUDE_BIN="$(conda run -n "${CONDA_ENV_NAME}" which claude 2>/dev/null || echo '')"
     if [ -z "${CLAUDE_BIN}" ]; then
@@ -376,11 +518,32 @@ install_plugins() {
     info "添加 marketplaces ..."
 
     # 添加 marketplaces (幂等操作, 已存在则跳过)
-    conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add github:anthropics/claude-plugins-official 2>&1 | while read line; do info "$line"; done || true
-    conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add github:tanweai/pua 2>&1 | while read line; do info "$line"; done || true
-    conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add git:https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1 | while read line; do info "$line"; done || true
-    conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add github:jarrodwatts/claude-hud 2>&1 | while read line; do info "$line"; done || true
-    ok "marketplaces 已配置"
+    # 使用 HTTPS URL 避免 SSH host key 问题
+    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
+        ok "marketplace claude-plugins-official 已就绪"
+    else
+        warn "marketplace claude-plugins-official 添加失败"
+    fi
+
+    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/tanweai/pua 2>&1; then
+        ok "marketplace pua-skills 已就绪"
+    else
+        warn "marketplace pua-skills 添加失败"
+    fi
+
+    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
+        ok "marketplace omc 已就绪"
+    else
+        warn "marketplace omc 添加失败"
+    fi
+
+    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
+        ok "marketplace claude-hud 已就绪"
+    else
+        warn "marketplace claude-hud 添加失败"
+    fi
+
+    ok "marketplaces 配置完成"
 
     info "安装插件 (可能需要几分钟)..."
 
@@ -396,7 +559,7 @@ install_plugins() {
 
     for plugin in "${PLUGINS[@]}"; do
         info "安装 ${plugin} ..."
-        if conda run -n "${CONDA_ENV_NAME}" claude plugin install "${plugin}" 2>&1 | while read line; do info "$line"; done; then
+        if conda run -n "${CONDA_ENV_NAME}" claude plugin install "${plugin}" 2>&1; then
             ok "${plugin} 安装成功"
         else
             warn "${plugin} 安装失败 (可稍后手动: claude plugin install ${plugin})"
@@ -408,7 +571,7 @@ install_plugins() {
 
 # ---- 9. Claude Code 配置恢复 ----
 restore_config() {
-    step "9/9" "Claude Code 配置恢复"
+    step "9/10" "Claude Code 配置恢复"
 
     # 创建目录
     if [ ! -d "${CLAUDE_DIR}" ]; then
@@ -419,27 +582,18 @@ restore_config() {
 
     # 恢复 settings.json
     if [ -f "${SCRIPT_DIR}/config/settings.json" ]; then
-        cp -v "${SCRIPT_DIR}/config/settings.json" "${CLAUDE_DIR}/" 2>&1 | while read line; do info "$line"; done
+        cp -v "${SCRIPT_DIR}/config/settings.json" "${CLAUDE_DIR}/" 2>&1
         ok "settings.json 已恢复"
     fi
 
     # 恢复 keybindings.json
     if [ -f "${SCRIPT_DIR}/config/keybindings.json" ]; then
-        cp -v "${SCRIPT_DIR}/config/keybindings.json" "${CLAUDE_DIR}/" 2>&1 | while read line; do info "$line"; done
+        cp -v "${SCRIPT_DIR}/config/keybindings.json" "${CLAUDE_DIR}/" 2>&1
         ok "keybindings.json 已恢复"
     fi
 
-    # 恢复插件 marketplaces
-    if [ -f "${SCRIPT_DIR}/plugins/known_marketplaces.json" ]; then
-        mkdir -p "${CLAUDE_DIR}/plugins"
-        cp -v "${SCRIPT_DIR}/plugins/known_marketplaces.json" "${CLAUDE_DIR}/plugins/" 2>&1 | while read line; do info "$line"; done
-        ok "known_marketplaces.json 已恢复"
-    fi
-
-    if [ -f "${SCRIPT_DIR}/plugins/installed_plugins.json" ]; then
-        cp -v "${SCRIPT_DIR}/plugins/installed_plugins.json" "${CLAUDE_DIR}/plugins/" 2>&1 | while read line; do info "$line"; done
-        ok "installed_plugins.json 已恢复"
-    fi
+    # 注意: 插件 marketplace 和 installed_plugins 元数据由步骤 9 (install_plugins) 自动生成,
+    # 不从此处覆盖，避免硬编码路径污染
 }
 
 # ---- 完成提示 ----
@@ -493,6 +647,11 @@ print_summary() {
     echo -e "    ANTHROPIC_MODEL          = ${ANTHROPIC_MODEL}"
     echo -e "    ANTHROPIC_DEFAULT_HAIKU  = ${ANTHROPIC_DEFAULT_HAIKU_MODEL}"
     echo -e "    CLAUDE_CODE_SUBAGENT     = ${CLAUDE_CODE_SUBAGENT_MODEL}"
+    if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "your-github-token-here" ]; then
+        echo -e "    GITHUB_TOKEN             = ***已设置*** (GitHub 认证就绪)"
+    else
+        echo -e "    GITHUB_TOKEN             = (未设置, git push 需要手动认证)"
+    fi
     echo ""
 }
 
@@ -507,10 +666,11 @@ main() {
     install_claude_code
     install_gemini_cli
     install_codex_cli
+    setup_github_auth
     setup_api_key
     load_env_vars
-    install_plugins
     restore_config
+    install_plugins
     print_summary
 }
 
