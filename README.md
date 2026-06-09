@@ -193,38 +193,63 @@ cp .env.example .env
 vim .env
 ```
 
-## 已安装插件 (7 个)
+## 各 CLI 安装内容
+
+脚本为三个 CLI **各自安装扩展/插件**，功能互不重叠:
+
+---
+
+### 🤖 Claude Code — 7 插件 + 4 市场 (脚本自动安装)
 
 | 插件 | 市场 | 版本 | 说明 |
 |------|------|------|------|
-| superpowers | claude-plugins-official | 5.1.0 | 系统化开发方法论 (TDD, brainstorming, code review 等) |
+| **superpowers** | claude-plugins-official | 5.1.0 | 系统化开发方法论 (brainstorming → TDD → review → 收尾) |
 | code-review | claude-plugins-official | - | 代码审查 |
-| github | claude-plugins-official | - | GitHub 集成 |
+| github | claude-plugins-official | - | GitHub 集成 (PR/Issue) |
 | skill-creator | claude-plugins-official | - | 创建自定义技能 |
-| pua | pua-skills | 3.4.6 | PUA 高效工作流 |
-| oh-my-claudecode | omc | 4.14.4 | 增强型工作流和工具集 (MCP, LSP) |
-| claude-hud | claude-hud | 0.1.0 | 状态栏显示 |
+| pua | pua-skills | 3.4.6 | PUA 高效工作流 (13 种企业文化风格) |
+| oh-my-claudecode | omc | 4.14.4 | 增强工具集 (30+ MCP 工具, 32+ Agent 类型) |
+| claude-hud | claude-hud | 0.1.0 | 终端状态栏 (模型/token/session) |
 
-## Marketplaces (4 个)
+**Marketplace 源:**
 
 | 市场 | 来源 |
 |------|------|
-| claude-plugins-official | github:anthropics/claude-plugins-official |
-| pua-skills | github:tanweai/pua |
-| omc | git:Yeachan-Heo/oh-my-claudecode |
-| claude-hud | github:jarrodwatts/claude-hud |
+| claude-plugins-official | `anthropics/claude-plugins-official` |
+| pua-skills | `tanweai/pua` |
+| omc | `Yeachan-Heo/oh-my-claudecode` |
+| claude-hud | `jarrodwatts/claude-hud` |
 
-## Superpowers 安装 (3 个 CLI 分别安装)
+---
 
-Superpowers 提供统一的开发工作流 (brainstorming → TDD → code review → 收尾)，需要在**每个 CLI 中单独安装**:
+### 🔮 Gemini CLI — 1 扩展 (脚本自动安装)
 
-| CLI | 安装命令 | 说明 |
-|-----|----------|------|
-| **Claude Code** | `claude plugin install superpowers@claude-plugins-official` | 脚本已自动安装 |
-| **Gemini CLI** | `gemini extensions install https://github.com/obra/superpowers` | 脚本已自动安装 |
-| **Codex CLI** | 进入 `codex` 后执行 `/plugins` → 搜索 `superpowers` → 安装 | ⚠️ 需手动交互操作 |
+| 扩展 | 来源 | 说明 |
+|------|------|------|
+| **superpowers** | `obra/superpowers` | 14 个开发工作流技能 (brainstorming, TDD, debugging, code review 等) |
 
-> 来源: [github.com/obra/superpowers](https://github.com/obra/superpowers)
+```bash
+# 手动安装命令 (脚本已自动执行)
+gemini extensions install https://github.com/obra/superpowers
+```
+
+---
+
+### ⚡ Codex CLI — 1 插件 (需手动安装)
+
+| 插件 | 来源 | 说明 |
+|------|------|------|
+| **superpowers** | OpenAI 官方市场 | 14 个开发工作流技能 |
+
+```bash
+# 进入 Codex 交互界面后手动操作
+codex
+/plugins              # 打开插件搜索
+# → 搜索 "superpowers" → 点击 Install
+```
+
+> ⚠️ Codex 插件必须通过交互界面安装，无法命令行自动化。
+> Superpowers 项目: [github.com/obra/superpowers](https://github.com/obra/superpowers)
 
 ## 手动恢复 (仅配置文件)
 

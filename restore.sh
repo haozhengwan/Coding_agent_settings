@@ -658,17 +658,15 @@ print_summary() {
     echo -e "    codex"
     echo ""
 
-    echo -e "  ${CYAN}插件已自动安装:${NC}"
-    echo -e "    superpowers, code-review, github, skill-creator,"
-    echo -e "    pua, oh-my-claudecode, claude-hud"
+    echo -e "  ${CYAN}各 CLI 扩展/插件安装状态:${NC}"
+    echo ""
+    echo -e "    ${GREEN}Claude Code (7 插件):${NC} superpowers, code-review, github, skill-creator, pua, oh-my-claudecode, claude-hud"
+    echo -e "    ${GREEN}Gemini CLI (1 扩展):${NC} superpowers"
+    echo -e "    ${YELLOW}Codex CLI (1 插件):${NC} superpowers — ⚠️ 需手动: codex → /plugins → 搜索安装"
     echo ""
 
-    echo -e "  ${CYAN}重新加载插件 (如需要):${NC}"
+    echo -e "  ${CYAN}重新加载 Claude Code 插件 (如需要):${NC}"
     echo -e "    进入 Claude Code 后执行 /plugin reload"
-    echo ""
-
-    echo -e "  ${YELLOW}⚠  Superpowers 在 Codex 中需手动安装:${NC}"
-    echo -e "    ${GREEN}Codex:${NC} 进入 codex → /plugins → 搜索 superpowers → 安装"
     echo ""
 
     echo -e "  ${CYAN}▸ 环境变量已配置:${NC}"

@@ -82,7 +82,9 @@
 | `CODEX_AUTH_METHOD` | `login` | Codex 认证: `login` (浏览器OAuth) 或 `api_key` |
 | `OPENAI_API_KEY` | (空) | OpenAI API Key (仅 api_key 模式) |
 
-## 已安装 Claude Code 插件 (7 个)
+## 各 CLI 安装内容
+
+### Claude Code — 7 插件 + 4 市场 (脚本自动)
 
 1. **superpowers@claude-plugins-official** (v5.1.0)
 2. **code-review@claude-plugins-official**
@@ -92,9 +94,9 @@
 6. **oh-my-claudecode@omc** (v4.14.4)
 7. **claude-hud@claude-hud** (v0.1.0)
 
-> 插件通过 `claude plugin install` 命令行自动安装，无需手动操作。
+> 通过 `claude plugin install` 命令行自动安装。
 
-## Marketplace 源
+**Marketplace 源:**
 
 | 市场 | 源 | 类型 |
 |------|-----|------|
@@ -103,10 +105,26 @@
 | omc | Yeachan-Heo/oh-my-claudecode | git |
 | claude-hud | jarrodwatts/claude-hud | github |
 
+### Gemini CLI — 1 扩展 (脚本自动)
+
+- **superpowers** (来源: `obra/superpowers`) — 14 个开发工作流技能
+
+> 通过 `gemini extensions install` 命令行自动安装。
+
+### Codex CLI — 1 插件 (需手动)
+
+- **superpowers** (来源: OpenAI 官方市场) — 14 个开发工作流技能
+
+> ⚠️ 需在 Codex 交互界面内手动安装: `codex` → `/plugins` → 搜索 superpowers
+
 ## 启动命令
 
 ```bash
+# conda 版
 conda activate claude
+
+# uv 版 (CLI 工具已在系统 PATH)
+# 无需激活, 直接使用
 
 # Claude Code
 claude
