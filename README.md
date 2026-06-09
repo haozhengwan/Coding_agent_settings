@@ -4,22 +4,45 @@
 
 ## 快速开始 (新机器)
 
+提供两种环境管理方案，**功能等价，按需选用**:
+
+| 方案 | 脚本 | 环境管理 | 体积 | 适用场景 |
+|------|------|----------|------|----------|
+| **conda 版** | `restore.sh` | Anaconda/Miniconda | ~500MB+ | 通用 Linux/macOS, 需要独立 Python + Node.js 环境 |
+| **uv 版** | `restore_uv.sh` | uv + venv | ~20MB + Node.js | NVIDIA 容器, 已有系统 Python, 追求轻量 |
+
+### conda 版 (兼容性最广)
+
 ```bash
 git clone https://github.com/haozhengwan/claude_code_settings.git
 cd claude_code_settings
 bash restore.sh
+# 启动: conda activate claude
 ```
+
+### uv 版 (轻量快速)
+
+```bash
+git clone https://github.com/haozhengwan/claude_code_settings.git
+cd claude_code_settings
+bash restore_uv.sh
+# CLI 工具直接可用 (已在系统 PATH), 无需激活
+# 如需 Python 环境: source ~/.venv/claude/bin/activate
+```
+
+### 部署流程 (两个版本)
 
 脚本会按顺序完成:
 1. **系统检查** — 安装 curl/wget/git 等基础工具
-2. **Anaconda 安装** — Miniconda + 专用 conda 环境 (Python + Node.js)
+2. **环境安装** — conda (conda 版) 或 uv + venv + Node.js (uv 版)
 3. **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
 4. **Gemini CLI** — `npm install -g @google/gemini-cli`
 5. **Codex CLI** — `npm install -g @openai/codex`
-6. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Gemini/Codex 三种 key)
-7. **环境变量加载** — 从 `.env` 加载并验证配置
-8. **插件自动安装** — 命令行自动安装 7 个 Claude Code 插件
-9. **配置恢复** — settings.json + keybindings.json + marketplaces
+6. **GitHub 认证** — git + gh CLI + SSH 配置
+7. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Gemini/Codex 三种 key)
+8. **环境变量加载** — 从 `.env` 加载并验证配置
+9. **配置恢复** — settings.json + keybindings.json
+10. **插件自动安装** — 命令行自动安装 7 个 Claude Code 插件
 
 ## 目录结构
 
@@ -33,7 +56,8 @@ bash restore.sh
 │   └── plugin-list.md         # 插件详细说明
 ├── .env.example               # API Key 模板 (可安全提交)
 ├── .env                       # 你的真实 API Key (gitignore 已排除)
-├── restore.sh                 # 一键部署脚本
+├── restore.sh                 # conda 版一键部署脚本
+├── restore_uv.sh              # uv 版一键部署脚本 (轻量, 推荐容器使用)
 ├── MANIFEST.md                # 完整文件清单
 ├── .gitignore
 └── README.md                  # 本文件
@@ -41,7 +65,27 @@ bash restore.sh
 
 ## 自定义变量
 
-### 基础环境变量
+### uv 版专属变量 (`restore_uv.sh`)
+
+```bash
+# 自定义 venv 目录
+VENV_DIR=~/.venv/claude-ai bash restore_uv.sh
+
+# 自定义 Node.js / Python 版本
+NODE_VERSION=22 PYTHON_VERSION=3.13 bash restore_uv.sh
+
+# 自定义 Node.js 安装路径
+NODE_INSTALL_PREFIX=/usr/local bash restore_uv.sh
+```
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `VENV_DIR` | `~/.venv/claude` | Python 虚拟环境路径 |
+| `NODE_VERSION` | `20` | Node.js 版本 (20 LTS) |
+| `PYTHON_VERSION` | `3.12` | Python 版本 (uv 可自动下载) |
+| `NODE_INSTALL_PREFIX` | `/usr/local` | Node.js 安装路径 (无 root 时回退到 `~/.local`) |
+
+### conda 版专属变量 (`restore.sh`)
 
 ```bash
 # 自定义 conda 安装路径
@@ -172,27 +216,42 @@ vim .env
 
 ## 手动恢复 (仅配置文件)
 
-如果已有 conda + Claude Code 环境，只想恢复配置:
+如果已有 Claude Code 环境 (conda 或 uv 版均可)，只想恢复配置:
 
 ```bash
 # 手动复制
 cp config/settings.json ~/.claude/
 cp config/keybindings.json ~/.claude/
-mkdir -p ~/.claude/plugins
-cp plugins/*.json ~/.claude/plugins/
 ```
 
 ## 启动
 
+### conda 版
+
 ```bash
 conda activate claude
+claude     # Claude Code
+gemini     # Gemini CLI
+codex      # Codex CLI
 ```
 
-### Claude Code
+### uv 版
+
+CLI 工具已安装在系统 PATH，**无需激活任何环境**即可使用:
 
 ```bash
-claude
+claude     # Claude Code
+gemini     # Gemini CLI
+codex      # Codex CLI
 ```
+
+如需 Python 虚拟环境:
+
+```bash
+source ~/.venv/claude/bin/activate  # 或自定义的 VENV_DIR
+```
+
+### 通用
 
 插件已自动安装并加载，无需手动操作。如需重新加载插件：
 
@@ -200,28 +259,26 @@ claude
 /plugin reload
 ```
 
-### Gemini CLI
-
-```bash
-gemini
-```
-
-### Codex CLI
-
-```bash
-codex
-```
-
 ## 快速环境变量导入
 
 如果 `.env` 已配置好，每次使用前快速加载：
 
 ```bash
+# conda 版
 source .env && conda activate claude
+
+# uv 版
+source .env
 ```
 
 ## 环境要求 (脚本会自动安装)
 
+### conda 版
 - Linux (x86_64/aarch64) 或 macOS
 - 网络连接
 - 脚本会自动安装: curl, wget, git, Miniconda, Node.js, Claude Code CLI, Gemini CLI, Codex CLI
+
+### uv 版
+- Linux (x86_64/aarch64)
+- 网络连接
+- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, Node.js, Claude Code CLI, Gemini CLI, Codex CLI
