@@ -214,6 +214,18 @@ vim .env
 | omc | git:Yeachan-Heo/oh-my-claudecode |
 | claude-hud | github:jarrodwatts/claude-hud |
 
+## Superpowers 安装 (3 个 CLI 分别安装)
+
+Superpowers 提供统一的开发工作流 (brainstorming → TDD → code review → 收尾)，需要在**每个 CLI 中单独安装**:
+
+| CLI | 安装命令 | 说明 |
+|-----|----------|------|
+| **Claude Code** | `claude plugin install superpowers@claude-plugins-official` | 脚本已自动安装 |
+| **Gemini CLI** | `gemini extensions install https://github.com/obra/superpowers` | 脚本已自动安装 |
+| **Codex CLI** | 进入 `codex` 后执行 `/plugins` → 搜索 `superpowers` → 安装 | ⚠️ 需手动交互操作 |
+
+> 来源: [github.com/obra/superpowers](https://github.com/obra/superpowers)
+
 ## 手动恢复 (仅配置文件)
 
 如果已有 Claude Code 环境 (conda 或 uv 版均可)，只想恢复配置:

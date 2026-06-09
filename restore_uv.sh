@@ -352,6 +352,14 @@ install_gemini_cli() {
     else
         warn "未能检测到 gemini 命令, 可能需要重启终端或手动加入 PATH"
     fi
+
+    # 安装 Superpowers 扩展
+    info "安装 Superpowers 扩展..."
+    if yes | gemini extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
+        ok "Gemini Superpowers 安装完成"
+    else
+        warn "Gemini Superpowers 安装失败 (可稍后手动: gemini extensions install https://github.com/obra/superpowers)"
+    fi
 }
 
 # ---- 5. Codex CLI 安装 ----
@@ -828,6 +836,10 @@ print_summary() {
 
     echo -e "  ${CYAN}重新加载插件 (如需要):${NC}"
     echo -e "    进入 Claude Code 后执行 /plugin reload"
+    echo ""
+
+    echo -e "  ${YELLOW}⚠  Superpowers 在 Codex 中需手动安装:${NC}"
+    echo -e "    ${GREEN}Codex:${NC} 进入 codex → /plugins → 搜索 superpowers → 安装"
     echo ""
 
     echo -e "  ${CYAN}▸ 环境变量已配置:${NC}"
