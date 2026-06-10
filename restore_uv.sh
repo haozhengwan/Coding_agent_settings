@@ -14,6 +14,7 @@ VENV_DIR="${VENV_DIR:-${HOME}/.venv/claude}"
 NODE_VERSION="${NODE_VERSION:-20}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX:-/usr/local}"
+GITHUB_PROXY_URL="${GITHUB_PROXY_URL:-${GH_PROXY_URL:-}}"
 
 # ---- Claude Code 配置 (可修改) ----
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
@@ -54,6 +55,58 @@ warn()  { echo -e "  ${YELLOW}⚠${NC} ${1}"; }
 fail()  { echo -e "  ${RED}✗${NC} ${1}"; }
 info()  { echo -e "  ${CYAN}→${NC} ${1}"; }
 
+refresh_github_proxy_url() {
+    if [ -z "${GITHUB_PROXY_URL:-}" ] && [ -n "${GH_PROXY_URL:-}" ]; then
+        GITHUB_PROXY_URL="${GH_PROXY_URL}"
+    fi
+    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+        GITHUB_PROXY_URL="${GITHUB_PROXY_URL%/}"
+    fi
+}
+
+github_url() {
+    local URL="$1"
+    refresh_github_proxy_url
+
+    if [ -n "${GITHUB_PROXY_URL:-}" ] && [[ "${URL}" == https://github.com/* ]]; then
+        printf '%s/%s' "${GITHUB_PROXY_URL}" "${URL}"
+    else
+        printf '%s' "${URL}"
+    fi
+}
+
+download_github_file() {
+    local URL="$1"
+    local OUTPUT="$2"
+    local LABEL="${3:-GitHub 文件}"
+    local DOWNLOAD_URL
+    DOWNLOAD_URL="$(github_url "${URL}")"
+
+    if [ "${DOWNLOAD_URL}" != "${URL}" ]; then
+        info "通过 GitHub 代理下载 ${LABEL}..."
+        if curl -fsSL "${DOWNLOAD_URL}" -o "${OUTPUT}"; then
+            return 0
+        fi
+        warn "代理下载失败, 尝试直连 GitHub..."
+    fi
+
+    info "下载 ${LABEL}..."
+    curl -fsSL "${URL}" -o "${OUTPUT}"
+}
+
+run_with_github_proxy() {
+    refresh_github_proxy_url
+
+    if [ -z "${GITHUB_PROXY_URL:-}" ]; then
+        "$@"
+    else
+        GIT_CONFIG_COUNT=1 \
+        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
+        GIT_CONFIG_VALUE_0="https://github.com/" \
+        "$@"
+    fi
+}
+
 banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
@@ -63,6 +116,19 @@ banner() {
     echo ""
 }
 
+preload_env_vars() {
+    if [ -f "${ENV_FILE}" ]; then
+        info "预加载 ${ENV_FILE} ..."
+        set -a
+        source "${ENV_FILE}"
+        set +a
+        refresh_github_proxy_url
+        ok ".env 已预加载"
+    else
+        refresh_github_proxy_url
+    fi
+}
+
 # ---- 1. 系统环境检查 ----
 check_system() {
     step "1/10" "系统环境检查"
@@ -70,6 +136,10 @@ check_system() {
     OS="$(uname -s)"
     ARCH="$(uname -m)"
     info "操作系统: ${OS} (${ARCH})"
+    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+        ok "GitHub 下载代理: ${GITHUB_PROXY_URL}"
+        info "将用于 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆"
+    fi
 
     # 检查基础工具
     for cmd in curl wget tar; do
@@ -355,7 +425,10 @@ install_gemini_cli() {
 
     # 安装 Superpowers 扩展
     info "安装 Superpowers 扩展..."
-    if yes | gemini extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
+    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+        info "Superpowers GitHub 克隆使用代理: ${GITHUB_PROXY_URL}"
+    fi
+    if (yes || true) | run_with_github_proxy gemini extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
         ok "Gemini Superpowers 安装完成"
     else
         warn "Gemini Superpowers 安装失败 (可稍后手动: gemini extensions install https://github.com/obra/superpowers)"
@@ -411,8 +484,7 @@ setup_github_auth() {
             local GH_TARBALL="/tmp/gh.tar.gz"
             local GH_TMPDIR="/tmp/gh_extract"
 
-            info "下载 gh CLI ${GH_VERSION}..."
-            if curl -fsSL "${GH_URL}" -o "${GH_TARBALL}"; then
+            if download_github_file "${GH_URL}" "${GH_TARBALL}" "gh CLI ${GH_VERSION}"; then
                 mkdir -p "${GH_TMPDIR}"
                 tar -xzf "${GH_TARBALL}" -C "${GH_TMPDIR}" --strip-components=1
 
@@ -586,6 +658,11 @@ CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
 # 权限: repo, workflow (根据需要勾选)
 GITHUB_TOKEN=your-github-token-here
 
+# ---- GitHub 下载代理 (可选) ----
+# 国内访问 GitHub 慢时可启用, 如 https://ghproxy.net 或 https://ghproxy.com
+# uv 版会用于 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆
+# GITHUB_PROXY_URL=https://ghproxy.net
+
 # ---- Gemini CLI ----
 # 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
 GEMINI_AUTH_METHOD=login
@@ -662,6 +739,7 @@ load_env_vars() {
         set -a
         source "${ENV_FILE}"
         set +a
+        refresh_github_proxy_url
         ok "环境变量已加载"
 
         # 验证关键变量
@@ -695,6 +773,10 @@ load_env_vars() {
             export GH_TOKEN="${GITHUB_TOKEN}"
         else
             warn "GITHUB_TOKEN 未设置或仍是占位符 (插件安装不受影响, 但 git push 需要)"
+        fi
+
+        if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+            ok "GitHub 下载代理已配置: ${GITHUB_PROXY_URL}"
         fi
     else
         warn ".env 文件不存在, 跳过环境变量加载"
@@ -737,27 +819,30 @@ install_plugins() {
     fi
 
     info "添加 marketplaces ..."
+    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+        info "Claude marketplace GitHub 克隆使用代理: ${GITHUB_PROXY_URL}"
+    fi
 
     # 添加 marketplaces (幂等操作, 已存在则跳过)
-    if claude plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
+    if run_with_github_proxy claude plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
         ok "marketplace claude-plugins-official 已就绪"
     else
         warn "marketplace claude-plugins-official 添加失败"
     fi
 
-    if claude plugin marketplace add https://github.com/tanweai/pua 2>&1; then
+    if run_with_github_proxy claude plugin marketplace add https://github.com/tanweai/pua 2>&1; then
         ok "marketplace pua-skills 已就绪"
     else
         warn "marketplace pua-skills 添加失败"
     fi
 
-    if claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
+    if run_with_github_proxy claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
         ok "marketplace omc 已就绪"
     else
         warn "marketplace omc 添加失败"
     fi
 
-    if claude plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
+    if run_with_github_proxy claude plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
         ok "marketplace claude-hud 已就绪"
     else
         warn "marketplace claude-hud 添加失败"
@@ -850,6 +935,9 @@ print_summary() {
     else
         echo -e "    GITHUB_TOKEN             = (未设置, git push 需要手动认证)"
     fi
+    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
+        echo -e "    GITHUB_PROXY_URL         = ${GITHUB_PROXY_URL}"
+    fi
     echo ""
 }
 
@@ -858,6 +946,7 @@ print_summary() {
 # ============================================================
 main() {
     banner
+    preload_env_vars
 
     check_system
     install_uv

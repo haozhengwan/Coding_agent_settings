@@ -16,7 +16,7 @@
 |------|------|
 | README.md | 项目说明 + 一键部署指南 (Claude Code + Gemini CLI + Codex CLI) |
 | restore.sh | **一键部署脚本** (Anaconda → Node.js → 3 个 AI CLI → API Key → 插件自动安装 → 配置恢复) |
-| .env.example | API Key 配置模板 (Claude + Gemini + Codex, 可安全提交) |
+| .env.example | API Key 与 GitHub 下载代理配置模板 (Claude + Gemini + Codex, 可安全提交) |
 | .gitignore | Git 忽略规则 (.env 已排除) |
 | MANIFEST.md | 本文件 |
 
@@ -81,6 +81,12 @@
 | `GEMINI_API_KEY` | (空) | Gemini API Key (仅 api_key 模式) |
 | `CODEX_AUTH_METHOD` | `login` | Codex 认证: `login` (浏览器OAuth) 或 `api_key` |
 | `OPENAI_API_KEY` | (空) | OpenAI API Key (仅 api_key 模式) |
+
+### GitHub 下载代理 (uv 版)
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆 |
 
 ## 各 CLI 安装内容
 

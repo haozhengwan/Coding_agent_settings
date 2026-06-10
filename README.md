@@ -76,6 +76,10 @@ NODE_VERSION=22 PYTHON_VERSION=3.13 bash restore_uv.sh
 
 # 自定义 Node.js 安装路径
 NODE_INSTALL_PREFIX=/usr/local bash restore_uv.sh
+
+# GitHub 下载/克隆较慢时启用代理
+GITHUB_PROXY_URL=https://ghproxy.net bash restore_uv.sh
+# 或: GH_PROXY_URL=https://ghproxy.com bash restore_uv.sh
 ```
 
 | 变量 | 默认值 | 说明 |
@@ -84,6 +88,7 @@ NODE_INSTALL_PREFIX=/usr/local bash restore_uv.sh
 | `NODE_VERSION` | `20` | Node.js 版本 (20 LTS) |
 | `PYTHON_VERSION` | `3.12` | Python 版本 (uv 可自动下载) |
 | `NODE_INSTALL_PREFIX` | `/usr/local` | Node.js 安装路径 (无 root 时回退到 `~/.local`) |
+| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 uv 版 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆 |
 
 ### conda 版专属变量 (`restore.sh`)
 
@@ -176,6 +181,12 @@ ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
 ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
 CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
+
+# ---- GitHub 认证 ----
+GITHUB_TOKEN=your-github-token-here
+
+# ---- GitHub 下载代理 (可选, uv 版) ----
+# GITHUB_PROXY_URL=https://ghproxy.net
 
 # ---- Gemini CLI (默认浏览器 OAuth 登录, 无需 API Key) ----
 GEMINI_AUTH_METHOD=login
