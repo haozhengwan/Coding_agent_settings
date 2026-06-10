@@ -9,7 +9,7 @@
 | 方案 | 脚本 | 环境管理 | 体积 | 适用场景 |
 |------|------|----------|------|----------|
 | **conda 版** | `restore.sh` | Anaconda/Miniconda | ~500MB+ | 通用 Linux/macOS, 需要独立 Python + Node.js 环境 |
-| **uv 版** | `restore_uv.sh` | uv + venv | ~20MB + Node.js | NVIDIA 容器, 已有系统 Python, 追求轻量 |
+| **uv 版** | `restore_uv.sh` | uv + venv | ~20MB + Node.js | NVIDIA 容器, 已有系统 Python, 追求轻量且隔离 CLI |
 
 ### conda 版 (兼容性最广)
 
@@ -26,18 +26,18 @@ bash restore.sh
 git clone https://github.com/haozhengwan/claude_code_settings.git
 cd claude_code_settings
 bash restore_uv.sh
-# CLI 工具直接可用 (已在系统 PATH), 无需激活
-# 如需 Python 环境: source ~/.venv/claude/bin/activate
+# 激活 venv 后使用 CLI:
+source ~/.venv/claude/bin/activate
 ```
 
 ### 部署流程 (两个版本)
 
 脚本会按顺序完成:
 1. **系统检查** — 安装 curl/wget/git 等基础工具
-2. **环境安装** — conda (conda 版) 或 uv + venv + Node.js (uv 版)
-3. **Claude Code CLI** — `npm install -g @anthropic-ai/claude-code`
-4. **Gemini CLI** — `npm install -g @google/gemini-cli`
-5. **Codex CLI** — `npm install -g @openai/codex`
+2. **环境安装** — conda (conda 版) 或 uv + venv + Node.js (uv 版, Node.js 位于 venv 内)
+3. **Claude Code CLI** — 在 venv npm prefix 下安装 `@anthropic-ai/claude-code`
+4. **Gemini CLI** — 在 venv npm prefix 下安装 `@google/gemini-cli`
+5. **Codex CLI** — 在 venv npm prefix 下安装 `@openai/codex`
 6. **GitHub 认证** — git + gh CLI + SSH 配置
 7. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Gemini/Codex 三种 key)
 8. **环境变量加载** — 从 `.env` 加载并验证配置
@@ -74,8 +74,8 @@ VENV_DIR=~/.venv/claude-ai bash restore_uv.sh
 # 自定义 Node.js / Python 版本
 NODE_VERSION=22 PYTHON_VERSION=3.13 bash restore_uv.sh
 
-# 自定义 Node.js 安装路径
-NODE_INSTALL_PREFIX=/usr/local bash restore_uv.sh
+# 自定义 Node.js / CLI 安装路径 (默认跟随 VENV_DIR, 通常无需设置)
+NODE_INSTALL_PREFIX=~/.venv/claude bash restore_uv.sh
 
 # GitHub 下载/克隆较慢时启用代理
 GITHUB_PROXY_URL=https://ghproxy.net bash restore_uv.sh
@@ -87,7 +87,7 @@ GITHUB_PROXY_URL=https://ghproxy.net bash restore_uv.sh
 | `VENV_DIR` | `~/.venv/claude` | Python 虚拟环境路径 |
 | `NODE_VERSION` | `20` | Node.js 版本 (20 LTS) |
 | `PYTHON_VERSION` | `3.12` | Python 版本 (uv 可自动下载) |
-| `NODE_INSTALL_PREFIX` | `/usr/local` | Node.js 安装路径 (无 root 时回退到 `~/.local`) |
+| `NODE_INSTALL_PREFIX` | `VENV_DIR` | Node.js 和 npm 全局 CLI 安装路径, 默认在 uv venv 内 |
 | `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 uv 版 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆 |
 
 ### conda 版专属变量 (`restore.sh`)
@@ -285,18 +285,13 @@ codex      # Codex CLI
 
 ### uv 版
 
-CLI 工具已安装在系统 PATH，**无需激活任何环境**即可使用:
-
-```bash
-claude     # Claude Code
-gemini     # Gemini CLI
-codex      # Codex CLI
-```
-
-如需 Python 虚拟环境:
+CLI 工具安装在 uv venv 的 `bin/` 目录内，激活 venv 后使用:
 
 ```bash
 source ~/.venv/claude/bin/activate  # 或自定义的 VENV_DIR
+claude     # Claude Code
+gemini     # Gemini CLI
+codex      # Codex CLI
 ```
 
 ### 通用
@@ -316,7 +311,7 @@ source ~/.venv/claude/bin/activate  # 或自定义的 VENV_DIR
 source .env && conda activate claude
 
 # uv 版
-source .env
+source .env && source ~/.venv/claude/bin/activate
 ```
 
 ## 环境要求 (脚本会自动安装)
@@ -329,4 +324,4 @@ source .env
 ### uv 版
 - Linux (x86_64/aarch64)
 - 网络连接
-- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, Node.js, Claude Code CLI, Gemini CLI, Codex CLI
+- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, venv 内 Node.js, venv 内 Claude Code CLI, Gemini CLI, Codex CLI

@@ -13,7 +13,7 @@ set -eo pipefail
 VENV_DIR="${VENV_DIR:-${HOME}/.venv/claude}"
 NODE_VERSION="${NODE_VERSION:-20}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
-NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX:-/usr/local}"
+NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX:-}"
 GITHUB_PROXY_URL="${GITHUB_PROXY_URL:-${GH_PROXY_URL:-}}"
 
 # ---- Claude Code 配置 (可修改) ----
@@ -105,6 +105,21 @@ run_with_github_proxy() {
         GIT_CONFIG_VALUE_0="https://github.com/" \
         "$@"
     fi
+}
+
+configure_venv_toolchain() {
+    if [ -z "${NODE_INSTALL_PREFIX:-}" ]; then
+        NODE_INSTALL_PREFIX="${VENV_DIR}"
+    fi
+    NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX%/}"
+    mkdir -p "${NODE_INSTALL_PREFIX}/bin" "${NODE_INSTALL_PREFIX}/lib"
+    export PATH="${NODE_INSTALL_PREFIX}/bin:${PATH}"
+    export NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}"
+}
+
+npm_install_global() {
+    local PACKAGE="$1"
+    NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}" npm install -g "${PACKAGE}" > /dev/null 2>&1
 }
 
 banner() {
@@ -300,18 +315,21 @@ setup_venv() {
 # ---- 2c. Node.js 安装 ----
 install_nodejs() {
     info "--- Node.js 运行时 ---"
+    configure_venv_toolchain
 
-    # 检查系统是否已有合适版本的 Node.js
-    if command -v node &>/dev/null; then
+    # uv 版将 Node.js 放入 venv, 不复用系统 Node.js
+    local NODE_BIN="${NODE_INSTALL_PREFIX}/bin/node"
+    local NPM_BIN="${NODE_INSTALL_PREFIX}/bin/npm"
+    if [ -x "${NODE_BIN}" ]; then
         local NODE_VER
-        NODE_VER=$(node --version 2>/dev/null | sed 's/^v//')
+        NODE_VER=$("${NODE_BIN}" --version 2>/dev/null | sed 's/^v//')
         local NODE_MAJOR="${NODE_VER%%.*}"
         if [ "${NODE_MAJOR}" -ge "${NODE_VERSION}" ]; then
-            ok "Node.js ${NODE_VER} 已满足要求 (>= ${NODE_VERSION})"
-            ok "npm $(npm --version 2>/dev/null)"
+            ok "venv Node.js ${NODE_VER} 已满足要求 (>= ${NODE_VERSION})"
+            ok "npm $("${NPM_BIN}" --version 2>/dev/null)"
             return
         else
-            warn "Node.js ${NODE_VER} 版本过低, 将安装 ${NODE_VERSION}.x"
+            warn "venv Node.js ${NODE_VER} 版本过低, 将安装 ${NODE_VERSION}.x"
         fi
     fi
 
@@ -350,33 +368,14 @@ install_nodejs() {
     if curl -fsSL "${NODE_URL}" -o "${NODE_TARBALL}"; then
         ok "下载完成"
 
-        # 检测是否需要 sudo
-        local SUDO=""
-        if [ ! -w "${NODE_INSTALL_PREFIX}" ]; then
-            if command -v sudo &>/dev/null; then
-                SUDO="sudo"
-                info "需要 sudo 权限写入 ${NODE_INSTALL_PREFIX}"
-            else
-                # 回退到用户目录
-                NODE_INSTALL_PREFIX="${HOME}/.local"
-                mkdir -p "${NODE_INSTALL_PREFIX}/bin" "${NODE_INSTALL_PREFIX}/lib"
-                info "无 root 权限, 安装到 ${NODE_INSTALL_PREFIX}"
-            fi
-        fi
-
         info "解压到 ${NODE_INSTALL_PREFIX} ..."
-        ${SUDO} tar -xJf "${NODE_TARBALL}" -C "${NODE_INSTALL_PREFIX}" --strip-components=1
+        tar -xJf "${NODE_TARBALL}" -C "${NODE_INSTALL_PREFIX}" --strip-components=1
         rm -f "${NODE_TARBALL}"
+        configure_venv_toolchain
 
-        # 确保 PATH 包含安装目录
-        export PATH="${NODE_INSTALL_PREFIX}/bin:${PATH}"
-        if ! command -v node &>/dev/null; then
-            warn "node 不在 PATH 中, 将 ${NODE_INSTALL_PREFIX}/bin 加入 PATH"
-            export PATH="${NODE_INSTALL_PREFIX}/bin:${PATH}"
-        fi
-
-        ok "Node.js $(node --version 2>/dev/null)"
-        ok "npm $(npm --version 2>/dev/null)"
+        ok "Node.js $("${NODE_BIN}" --version 2>/dev/null)"
+        ok "npm $("${NPM_BIN}" --version 2>/dev/null)"
+        ok "Node.js 已安装到 venv: ${NODE_INSTALL_PREFIX}"
     else
         fail "Node.js 下载失败, 请检查网络"
         warn "你可以手动安装 Node.js 后重新运行本脚本"
@@ -386,18 +385,20 @@ install_nodejs() {
 # ---- 3. Claude Code CLI 安装 ----
 install_claude_code() {
     step "3/10" "Claude Code CLI 安装"
+    configure_venv_toolchain
+    local CLAUDE_BIN="${NODE_INSTALL_PREFIX}/bin/claude"
 
-    if command -v claude &>/dev/null; then
-        ok "claude 已安装: $(claude --version 2>/dev/null || echo 'version check skipped')"
+    if [ -x "${CLAUDE_BIN}" ]; then
+        ok "claude 已安装: $("${CLAUDE_BIN}" --version 2>/dev/null || echo 'version check skipped')"
     else
-        info "通过 npm 安装 @anthropic-ai/claude-code ..."
-        npm install -g @anthropic-ai/claude-code > /dev/null 2>&1
+        info "通过 venv npm 安装 @anthropic-ai/claude-code ..."
+        npm_install_global @anthropic-ai/claude-code
         ok "Claude Code CLI 安装完成"
     fi
 
     # 确认
-    CLAUDE_PATH="$(which claude 2>/dev/null || echo '')"
-    if [ -n "${CLAUDE_PATH}" ]; then
+    CLAUDE_PATH="${CLAUDE_BIN}"
+    if [ -x "${CLAUDE_PATH}" ]; then
         ok "claude 路径: ${CLAUDE_PATH}"
     else
         warn "未能检测到 claude 命令, 可能需要重启终端或手动加入 PATH"
@@ -407,17 +408,19 @@ install_claude_code() {
 # ---- 4. Gemini CLI 安装 ----
 install_gemini_cli() {
     step "4/10" "Gemini CLI 安装"
+    configure_venv_toolchain
+    local GEMINI_BIN="${NODE_INSTALL_PREFIX}/bin/gemini"
 
-    if command -v gemini &>/dev/null; then
-        ok "gemini 已安装: $(gemini --version 2>/dev/null || echo 'version check skipped')"
+    if [ -x "${GEMINI_BIN}" ]; then
+        ok "gemini 已安装: $("${GEMINI_BIN}" --version 2>/dev/null || echo 'version check skipped')"
     else
-        info "通过 npm 安装 @google/gemini-cli ..."
-        npm install -g @google/gemini-cli > /dev/null 2>&1
+        info "通过 venv npm 安装 @google/gemini-cli ..."
+        npm_install_global @google/gemini-cli
         ok "Gemini CLI 安装完成"
     fi
 
-    GEMINI_PATH="$(which gemini 2>/dev/null || echo '')"
-    if [ -n "${GEMINI_PATH}" ]; then
+    GEMINI_PATH="${GEMINI_BIN}"
+    if [ -x "${GEMINI_PATH}" ]; then
         ok "gemini 路径: ${GEMINI_PATH}"
     else
         warn "未能检测到 gemini 命令, 可能需要重启终端或手动加入 PATH"
@@ -428,7 +431,7 @@ install_gemini_cli() {
     if [ -n "${GITHUB_PROXY_URL:-}" ]; then
         info "Superpowers GitHub 克隆使用代理: ${GITHUB_PROXY_URL}"
     fi
-    if (yes || true) | run_with_github_proxy gemini extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
+    if (yes || true) | run_with_github_proxy "${GEMINI_BIN}" extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
         ok "Gemini Superpowers 安装完成"
     else
         warn "Gemini Superpowers 安装失败 (可稍后手动: gemini extensions install https://github.com/obra/superpowers)"
@@ -438,17 +441,19 @@ install_gemini_cli() {
 # ---- 5. Codex CLI 安装 ----
 install_codex_cli() {
     step "5/10" "Codex CLI 安装"
+    configure_venv_toolchain
+    local CODEX_BIN="${NODE_INSTALL_PREFIX}/bin/codex"
 
-    if command -v codex &>/dev/null; then
-        ok "codex 已安装: $(codex --version 2>/dev/null || echo 'version check skipped')"
+    if [ -x "${CODEX_BIN}" ]; then
+        ok "codex 已安装: $("${CODEX_BIN}" --version 2>/dev/null || echo 'version check skipped')"
     else
-        info "通过 npm 安装 @openai/codex ..."
-        npm install -g @openai/codex > /dev/null 2>&1
+        info "通过 venv npm 安装 @openai/codex ..."
+        npm_install_global @openai/codex
         ok "Codex CLI 安装完成"
     fi
 
-    CODEX_PATH="$(which codex 2>/dev/null || echo '')"
-    if [ -n "${CODEX_PATH}" ]; then
+    CODEX_PATH="${CODEX_BIN}"
+    if [ -x "${CODEX_PATH}" ]; then
         ok "codex 路径: ${CODEX_PATH}"
     else
         warn "未能检测到 codex 命令, 可能需要重启终端或手动加入 PATH"
@@ -458,6 +463,8 @@ install_codex_cli() {
 # ---- 6. GitHub 认证配置 ----
 setup_github_auth() {
     step "6/10" "GitHub 认证配置 (git + gh CLI + SSH)"
+    configure_venv_toolchain
+    local GH_BIN="${NODE_INSTALL_PREFIX}/bin/gh"
 
     # 修复 git 安全目录问题 (常见于 root/sudo 场景)
     info "配置 git 安全目录..."
@@ -466,8 +473,8 @@ setup_github_auth() {
     ok "git safe.directory 已配置"
 
     # 安装 GitHub CLI (直接下载二进制, 不依赖 conda)
-    if command -v gh &>/dev/null; then
-        ok "gh CLI 已安装: $(gh --version 2>/dev/null | head -1)"
+    if [ -x "${GH_BIN}" ]; then
+        ok "gh CLI 已安装: $("${GH_BIN}" --version 2>/dev/null | head -1)"
     else
         info "安装 GitHub CLI (gh)..."
         local GH_INSTALLED=false
@@ -488,48 +495,27 @@ setup_github_auth() {
                 mkdir -p "${GH_TMPDIR}"
                 tar -xzf "${GH_TARBALL}" -C "${GH_TMPDIR}" --strip-components=1
 
-                local GH_INSTALL_DIR="${NODE_INSTALL_PREFIX}"
-                if [ ! -w "${GH_INSTALL_DIR}" ]; then
-                    if command -v sudo &>/dev/null; then
-                        sudo cp "${GH_TMPDIR}/bin/gh" "${GH_INSTALL_DIR}/bin/" 2>/dev/null || GH_INSTALL_DIR="${HOME}/.local"
-                    else
-                        GH_INSTALL_DIR="${HOME}/.local"
-                    fi
-                fi
-                mkdir -p "${GH_INSTALL_DIR}/bin"
-                cp "${GH_TMPDIR}/bin/gh" "${GH_INSTALL_DIR}/bin/"
-                export PATH="${GH_INSTALL_DIR}/bin:${PATH}"
+                mkdir -p "${NODE_INSTALL_PREFIX}/bin"
+                cp "${GH_TMPDIR}/bin/gh" "${GH_BIN}"
+                chmod +x "${GH_BIN}"
+                configure_venv_toolchain
                 rm -rf "${GH_TARBALL}" "${GH_TMPDIR}"
                 GH_INSTALLED=true
-                ok "gh CLI 安装完成: $(gh --version 2>/dev/null | head -1)"
+                ok "gh CLI 安装完成: $("${GH_BIN}" --version 2>/dev/null | head -1)"
             fi
         fi
 
         # 尝试方式 2: npm 安装
         if [ "${GH_INSTALLED}" = false ]; then
-            info "尝试通过 npm 安装 gh..."
-            if npm install -g @github/gh 2>/dev/null; then
+            info "尝试通过 venv npm 安装 gh..."
+            if npm_install_global @github/gh; then
                 GH_INSTALLED=true
                 ok "gh CLI (npm) 安装完成"
             fi
         fi
 
-        # 尝试方式 3: 系统包管理器
         if [ "${GH_INSTALLED}" = false ]; then
-            if command -v apt-get &>/dev/null; then
-                info "尝试通过 apt 安装 gh..."
-                apt-get update -qq && apt-get install -y -qq gh 2>/dev/null && GH_INSTALLED=true
-            elif command -v yum &>/dev/null; then
-                info "尝试通过 yum 安装 gh..."
-                yum install -y -q gh 2>/dev/null && GH_INSTALLED=true
-            elif command -v dnf &>/dev/null; then
-                info "尝试通过 dnf 安装 gh..."
-                dnf install -y -q gh 2>/dev/null && GH_INSTALLED=true
-            fi
-        fi
-
-        if [ "${GH_INSTALLED}" = false ]; then
-            warn "gh CLI 安装失败, 请手动安装: https://github.com/cli/cli/releases"
+            warn "gh CLI 安装失败, 请手动安装到 ${NODE_INSTALL_PREFIX}/bin/gh: https://github.com/cli/cli/releases"
         fi
     fi
 
@@ -551,7 +537,7 @@ setup_github_auth() {
     if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "your-github-token-here" ]; then
         info "检测到 GITHUB_TOKEN, 配置 gh CLI..."
         export GH_TOKEN="${GITHUB_TOKEN}"
-        if echo "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null; then
+        if [ -x "${GH_BIN}" ] && echo "${GITHUB_TOKEN}" | "${GH_BIN}" auth login --with-token 2>/dev/null; then
             ok "GitHub 已通过 GITHUB_TOKEN 认证"
             USE_TOKEN=true
             AUTH_OK=true
@@ -566,7 +552,7 @@ setup_github_auth() {
         ok "git HTTPS credential 已配置"
     elif [ -n "${GH_TOKEN}" ] && [ "${GH_TOKEN}" != "your-github-token-here" ]; then
         export GITHUB_TOKEN="${GH_TOKEN}"
-        if echo "${GH_TOKEN}" | gh auth login --with-token 2>/dev/null; then
+        if [ -x "${GH_BIN}" ] && echo "${GH_TOKEN}" | "${GH_BIN}" auth login --with-token 2>/dev/null; then
             ok "GitHub 已通过 GH_TOKEN 认证"
             USE_TOKEN=true
             AUTH_OK=true
@@ -576,7 +562,7 @@ setup_github_auth() {
 
     # 方式 2: gh CLI 已有认证
     if [ "${AUTH_OK}" = false ]; then
-        if gh auth status 2>&1 | grep -q "Logged in"; then
+        if [ -x "${GH_BIN}" ] && "${GH_BIN}" auth status 2>&1 | grep -q "Logged in"; then
             ok "GitHub 已通过 gh CLI 认证"
             AUTH_OK=true
         fi
@@ -618,7 +604,7 @@ setup_github_auth() {
         read -r -p "  是否已经准备好认证? (y/n, 选 n 跳过): " AUTH_READY 2>/dev/null || AUTH_READY="n"
         if [ "${AUTH_READY}" = "y" ] || [ "${AUTH_READY}" = "Y" ]; then
             info "尝试 gh auth login..."
-            gh auth login || {
+            "${GH_BIN}" auth login || {
                 warn "gh auth login 失败, 请稍后手动认证"
             }
         else
@@ -812,9 +798,9 @@ restore_config() {
 install_plugins() {
     step "10/10" "Claude Code 插件自动安装"
 
-    CLAUDE_BIN="$(which claude 2>/dev/null || echo '')"
-    if [ -z "${CLAUDE_BIN}" ]; then
-        warn "claude 命令未找到, 跳过插件安装"
+    CLAUDE_BIN="${NODE_INSTALL_PREFIX}/bin/claude"
+    if [ ! -x "${CLAUDE_BIN}" ]; then
+        warn "venv claude 命令未找到, 跳过插件安装"
         return
     fi
 
@@ -824,25 +810,25 @@ install_plugins() {
     fi
 
     # 添加 marketplaces (幂等操作, 已存在则跳过)
-    if run_with_github_proxy claude plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
+    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
         ok "marketplace claude-plugins-official 已就绪"
     else
         warn "marketplace claude-plugins-official 添加失败"
     fi
 
-    if run_with_github_proxy claude plugin marketplace add https://github.com/tanweai/pua 2>&1; then
+    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/tanweai/pua 2>&1; then
         ok "marketplace pua-skills 已就绪"
     else
         warn "marketplace pua-skills 添加失败"
     fi
 
-    if run_with_github_proxy claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
+    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
         ok "marketplace omc 已就绪"
     else
         warn "marketplace omc 添加失败"
     fi
 
-    if run_with_github_proxy claude plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
+    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
         ok "marketplace claude-hud 已就绪"
     else
         warn "marketplace claude-hud 添加失败"
@@ -864,7 +850,7 @@ install_plugins() {
 
     for plugin in "${PLUGINS[@]}"; do
         info "安装 ${plugin} ..."
-        if claude plugin install "${plugin}" 2>&1; then
+        if "${CLAUDE_BIN}" plugin install "${plugin}" 2>&1; then
             ok "${plugin} 安装成功"
         else
             warn "${plugin} 安装失败 (可稍后手动: claude plugin install ${plugin})"
@@ -885,9 +871,10 @@ print_summary() {
     echo -e "  ${CYAN}环境概览:${NC}"
     echo -e "    uv 版本:      $(uv --version 2>/dev/null || echo 'unknown')"
     echo -e "    venv 目录:    ${VENV_DIR}"
+    echo -e "    CLI 目录:     ${NODE_INSTALL_PREFIX}/bin"
     echo -e "    激活命令:      ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
-    echo -e "    Node.js:      $(node --version 2>/dev/null || echo 'unknown')"
-    echo -e "    npm:          $(npm --version 2>/dev/null || echo 'unknown')"
+    echo -e "    Node.js:      $("${NODE_INSTALL_PREFIX}/bin/node" --version 2>/dev/null || echo 'unknown')"
+    echo -e "    npm:          $("${NODE_INSTALL_PREFIX}/bin/npm" --version 2>/dev/null || echo 'unknown')"
     echo -e "    Claude Code:   ${GREEN}claude${NC}"
     echo -e "    Gemini CLI:    ${GREEN}gemini${NC}"
     echo -e "    Codex CLI:     ${GREEN}codex${NC}"
@@ -895,8 +882,8 @@ print_summary() {
     echo ""
 
     if [ -d "${VENV_DIR}" ]; then
-        echo -e "  ${CYAN}提示:${NC} CLI 工具已安装在系统级 PATH, 无需激活 venv 即可使用"
-        echo -e "  如需 Python 环境: ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
+        echo -e "  ${CYAN}提示:${NC} CLI 工具已安装到 venv 内, 激活后使用:"
+        echo -e "    ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
         echo ""
     fi
 
@@ -908,7 +895,7 @@ print_summary() {
     fi
 
     echo -e "  ${CYAN}启动方式:${NC}"
-    echo -e "    ${GREEN}# 直接使用 (无需激活)${NC}"
+    echo -e "    ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
     echo -e "    claude"
     echo -e "    gemini"
     echo -e "    codex"

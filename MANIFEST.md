@@ -40,9 +40,9 @@
 |------|------|
 | 1/9 | 系统环境检查 (OS, curl, wget, git) |
 | 2/9 | Miniconda 安装 + conda 环境创建 (Python + Node.js) |
-| 3/9 | Claude Code CLI 安装 (`npm install -g @anthropic-ai/claude-code`) |
-| 4/9 | Gemini CLI 安装 (`npm install -g @google/gemini-cli`) |
-| 5/9 | Codex CLI 安装 (`npm install -g @openai/codex`) |
+| 3/9 | Claude Code CLI 安装 (venv npm prefix 下安装 `@anthropic-ai/claude-code`) |
+| 4/9 | Gemini CLI 安装 (venv npm prefix 下安装 `@google/gemini-cli`) |
+| 5/9 | Codex CLI 安装 (venv npm prefix 下安装 `@openai/codex`) |
 | 6/9 | API Key 配置 (交互式创建 .env, 支持 Claude/Gemini/Codex 三种 key) |
 | 7/9 | 环境变量加载与验证 (从 .env source 并校验) |
 | 8/9 | Claude Code 插件自动安装 (marketplace add + plugin install, 7 个插件) |
@@ -129,8 +129,8 @@
 # conda 版
 conda activate claude
 
-# uv 版 (CLI 工具已在系统 PATH)
-# 无需激活, 直接使用
+# uv 版 (CLI 工具位于 uv venv 内)
+source ~/.venv/claude/bin/activate
 
 # Claude Code
 claude
