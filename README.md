@@ -210,11 +210,10 @@ vim .env
 
 ---
 
-### 🤖 Claude Code — 7 插件 + 4 市场 (脚本自动安装)
+### 🤖 Claude Code — 6 插件 + 4 市场 (脚本自动安装)
 
 | 插件 | 市场 | 版本 | 说明 |
 |------|------|------|------|
-| **superpowers** | claude-plugins-official | 5.1.0 | 系统化开发方法论 (brainstorming → TDD → review → 收尾) |
 | code-review | claude-plugins-official | - | 代码审查 |
 | github | claude-plugins-official | - | GitHub 集成 (PR/Issue) |
 | skill-creator | claude-plugins-official | - | 创建自定义技能 |
@@ -233,34 +232,15 @@ vim .env
 
 ---
 
-### 🔮 Gemini CLI — 1 扩展 (脚本自动安装)
+### 🔮 Gemini CLI
 
-| 扩展 | 来源 | 说明 |
-|------|------|------|
-| **superpowers** | `obra/superpowers` | 14 个开发工作流技能 (brainstorming, TDD, debugging, code review 等) |
-
-```bash
-# 手动安装命令 (脚本已自动执行)
-gemini extensions install https://github.com/obra/superpowers
-```
+脚本不自动安装 Gemini 扩展。
 
 ---
 
-### ⚡ Codex CLI — 1 插件 (需手动安装)
+### ⚡ Codex CLI
 
-| 插件 | 来源 | 说明 |
-|------|------|------|
-| **superpowers** | OpenAI 官方市场 | 14 个开发工作流技能 |
-
-```bash
-# 进入 Codex 交互界面后手动操作
-codex
-/plugins              # 打开插件搜索
-# → 搜索 "superpowers" → 点击 Install
-```
-
-> ⚠️ Codex 插件必须通过交互界面安装，无法命令行自动化。
-> Superpowers 项目: [github.com/obra/superpowers](https://github.com/obra/superpowers)
+脚本不自动安装 Codex 插件。
 
 ## 手动恢复 (仅配置文件)
 

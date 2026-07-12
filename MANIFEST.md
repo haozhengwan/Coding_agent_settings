@@ -92,13 +92,12 @@
 
 ### Claude Code — 7 插件 + 4 市场 (脚本自动)
 
-1. **superpowers@claude-plugins-official** (v5.1.0)
-2. **code-review@claude-plugins-official**
-3. **github@claude-plugins-official**
-4. **skill-creator@claude-plugins-official**
-5. **pua@pua-skills** (v3.4.6)
-6. **oh-my-claudecode@omc** (v4.14.4)
-7. **claude-hud@claude-hud** (v0.1.0)
+1. **code-review@claude-plugins-official**
+2. **github@claude-plugins-official**
+3. **skill-creator@claude-plugins-official**
+4. **pua@pua-skills** (v3.4.6)
+5. **oh-my-claudecode@omc** (v4.14.4)
+6. **claude-hud@claude-hud** (v0.1.0)
 
 > 通过 `claude plugin install` 命令行自动安装。
 
@@ -111,17 +110,13 @@
 | omc | Yeachan-Heo/oh-my-claudecode | git |
 | claude-hud | jarrodwatts/claude-hud | github |
 
-### Gemini CLI — 1 扩展 (脚本自动)
+### Gemini CLI
 
-- **superpowers** (来源: `obra/superpowers`) — 14 个开发工作流技能
+脚本不自动安装 Gemini 扩展。
 
-> 通过 `gemini extensions install` 命令行自动安装。
+### Codex CLI
 
-### Codex CLI — 1 插件 (需手动)
-
-- **superpowers** (来源: OpenAI 官方市场) — 14 个开发工作流技能
-
-> ⚠️ 需在 Codex 交互界面内手动安装: `codex` → `/plugins` → 搜索 superpowers
+脚本不自动安装 Codex 插件。
 
 ## 启动命令
 

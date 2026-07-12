@@ -426,16 +426,6 @@ install_gemini_cli() {
         warn "未能检测到 gemini 命令, 可能需要重启终端或手动加入 PATH"
     fi
 
-    # 安装 Superpowers 扩展
-    info "安装 Superpowers 扩展..."
-    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-        info "Superpowers GitHub 克隆使用代理: ${GITHUB_PROXY_URL}"
-    fi
-    if (yes || true) | run_with_github_proxy "${GEMINI_BIN}" extensions install https://github.com/obra/superpowers 2>&1 | tail -1; then
-        ok "Gemini Superpowers 安装完成"
-    else
-        warn "Gemini Superpowers 安装失败 (可稍后手动: gemini extensions install https://github.com/obra/superpowers)"
-    fi
 }
 
 # ---- 5. Codex CLI 安装 ----
@@ -839,7 +829,6 @@ install_plugins() {
     info "安装插件 (可能需要几分钟)..."
 
     PLUGINS=(
-        "superpowers@claude-plugins-official"
         "code-review@claude-plugins-official"
         "github@claude-plugins-official"
         "skill-creator@claude-plugins-official"
@@ -903,9 +892,9 @@ print_summary() {
 
     echo -e "  ${CYAN}各 CLI 扩展/插件安装状态:${NC}"
     echo ""
-    echo -e "    ${GREEN}Claude Code (7 插件):${NC} superpowers, code-review, github, skill-creator, pua, oh-my-claudecode, claude-hud"
-    echo -e "    ${GREEN}Gemini CLI (1 扩展):${NC} superpowers"
-    echo -e "    ${YELLOW}Codex CLI (1 插件):${NC} superpowers — ⚠️ 需手动: codex → /plugins → 搜索安装"
+    echo -e "    ${GREEN}Claude Code (6 插件):${NC} code-review, github, skill-creator, pua, oh-my-claudecode, claude-hud"
+    echo -e "    ${GREEN}Gemini CLI:${NC} 未自动安装扩展"
+    echo -e "    ${YELLOW}Codex CLI:${NC} 未自动安装插件"
     echo ""
 
     echo -e "  ${CYAN}重新加载 Claude Code 插件 (如需要):${NC}"
