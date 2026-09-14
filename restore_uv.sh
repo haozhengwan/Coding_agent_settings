@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-#  AI CLI 工具一键部署脚本 (uv 版 · 10 步)
-#  涵盖: uv → venv → Node.js → Claude Code / Gemini CLI / Codex CLI → GitHub 认证 → API Key → 配置恢复 → 插件安装
+#  AI CLI 工具一键部署脚本 (uv 版 · 8 步)
+#  涵盖: uv → venv → Node.js → Claude Code / Codex CLI → GitHub 认证 → API Key → 配置恢复
 #
 #  适用场景: NVIDIA 官方容器 / 已有系统 Python 的环境
 #  与 restore.sh (conda 版) 功能等价, 但使用 uv (20MB) 替代 Anaconda (500MB+)
@@ -25,11 +25,6 @@ ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-deepseek-v4-pr
 ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-deepseek-v4-flash}"
 CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-deepseek-v4-flash}"
 
-# ---- Gemini CLI 配置 (可修改) ----
-# 认证方式: "login" (浏览器OAuth, 默认) 或 "api_key"
-GEMINI_AUTH_METHOD="${GEMINI_AUTH_METHOD:-login}"
-GEMINI_API_KEY="${GEMINI_API_KEY:-}"
-
 # ---- Codex CLI 配置 (可修改) ----
 # 认证方式: "login" (浏览器OAuth, 默认) 或 "api_key"
 CODEX_AUTH_METHOD="${CODEX_AUTH_METHOD:-login}"
@@ -39,6 +34,7 @@ CLAUDE_DIR="${HOME}/.claude"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
+source "${SCRIPT_DIR}/lib/network.sh"
 
 # ---- 颜色 ----
 RED='\033[0;31m'
@@ -64,49 +60,6 @@ refresh_github_proxy_url() {
     fi
 }
 
-github_url() {
-    local URL="$1"
-    refresh_github_proxy_url
-
-    if [ -n "${GITHUB_PROXY_URL:-}" ] && [[ "${URL}" == https://github.com/* ]]; then
-        printf '%s/%s' "${GITHUB_PROXY_URL}" "${URL}"
-    else
-        printf '%s' "${URL}"
-    fi
-}
-
-download_github_file() {
-    local URL="$1"
-    local OUTPUT="$2"
-    local LABEL="${3:-GitHub 文件}"
-    local DOWNLOAD_URL
-    DOWNLOAD_URL="$(github_url "${URL}")"
-
-    if [ "${DOWNLOAD_URL}" != "${URL}" ]; then
-        info "通过 GitHub 代理下载 ${LABEL}..."
-        if curl -fsSL "${DOWNLOAD_URL}" -o "${OUTPUT}"; then
-            return 0
-        fi
-        warn "代理下载失败, 尝试直连 GitHub..."
-    fi
-
-    info "下载 ${LABEL}..."
-    curl -fsSL "${URL}" -o "${OUTPUT}"
-}
-
-run_with_github_proxy() {
-    refresh_github_proxy_url
-
-    if [ -z "${GITHUB_PROXY_URL:-}" ]; then
-        "$@"
-    else
-        GIT_CONFIG_COUNT=1 \
-        GIT_CONFIG_KEY_0="url.${GITHUB_PROXY_URL}/https://github.com/.insteadOf" \
-        GIT_CONFIG_VALUE_0="https://github.com/" \
-        "$@"
-    fi
-}
-
 configure_venv_toolchain() {
     if [ -z "${NODE_INSTALL_PREFIX:-}" ]; then
         NODE_INSTALL_PREFIX="${VENV_DIR}"
@@ -119,14 +72,14 @@ configure_venv_toolchain() {
 
 npm_install_global() {
     local PACKAGE="$1"
-    NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}" npm install -g "${PACKAGE}" > /dev/null 2>&1
+    NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}" npm_install_with_retry "${PACKAGE}" "${NODE_INSTALL_PREFIX}/bin/npm"
 }
 
 banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}   AI CLI 工具一键部署 (uv 版)          ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   Claude Code + Gemini CLI + Codex CLI  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   Claude Code + Codex CLI               ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -146,14 +99,14 @@ preload_env_vars() {
 
 # ---- 1. 系统环境检查 ----
 check_system() {
-    step "1/10" "系统环境检查"
+    step "1/8" "系统环境检查"
 
     OS="$(uname -s)"
     ARCH="$(uname -m)"
     info "操作系统: ${OS} (${ARCH})"
     if [ -n "${GITHUB_PROXY_URL:-}" ]; then
         ok "GitHub 下载代理: ${GITHUB_PROXY_URL}"
-        info "将用于 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆"
+        info "将用于 gh Release 下载"
     fi
 
     # 检查基础工具
@@ -227,7 +180,7 @@ check_system() {
 
 # ---- 2a. uv 安装 ----
 install_uv() {
-    step "2/10" "uv + venv + Node.js 环境"
+    step "2/8" "uv + venv + Node.js 环境"
 
     info "--- uv Python 包管理器 ---"
 
@@ -248,7 +201,17 @@ install_uv() {
 
     if [ "${UV_EXISTING}" = "no" ]; then
         info "安装 uv (Astral 官方脚本)..."
-        curl -LsSf https://astral.sh/uv/install.sh | sh
+        local UV_INSTALLER
+        UV_INSTALLER="$(mktemp)"
+        if ! download_file "${UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}" "${UV_INSTALLER}"; then
+            rm -f "${UV_INSTALLER}"
+            return 1
+        fi
+        if ! sh "${UV_INSTALLER}"; then
+            rm -f "${UV_INSTALLER}"
+            return 1
+        fi
+        rm -f "${UV_INSTALLER}"
         export PATH="${HOME}/.local/bin:${PATH}"
         ok "uv 安装完成: $(uv --version 2>/dev/null)"
     fi
@@ -343,34 +306,36 @@ install_nodejs() {
         *)             fail "不支持的 CPU 架构: ${ARCH}"; return 1 ;;
     esac
 
-    # 获取 Node.js 最新 LTS 版本号 (通过 nodejs.org API)
-    local NODE_FULL_VERSION
-    info "查询 Node.js ${NODE_VERSION}.x 最新版本..."
-    NODE_FULL_VERSION=$(curl -fsSL "https://nodejs.org/dist/latest-v${NODE_VERSION}.x/SHASUMS256.txt" 2>/dev/null | head -1 | awk '{print $2}' | sed 's/node-v//;s/-.*//' || echo "")
-
-    if [ -z "${NODE_FULL_VERSION}" ]; then
-        # 回退: 使用已知的稳定版本号
-        case "${NODE_VERSION}" in
-            18) NODE_FULL_VERSION="18.20.4" ;;
-            20) NODE_FULL_VERSION="20.15.1" ;;
-            22) NODE_FULL_VERSION="22.12.0" ;;
-            24) NODE_FULL_VERSION="24.2.0" ;;
-            *)  NODE_FULL_VERSION="${NODE_VERSION}.0.0" ;;
-        esac
-        warn "无法查询最新版本, 使用 ${NODE_FULL_VERSION}"
+    # Read the complete manifest to avoid a head/pipefail SIGPIPE failure.
+    local NODE_BASE="${NODE_DIST_URL:-https://nodejs.org/dist}"
+    local NODE_WORKDIR NODE_FULL_VERSION NODE_FILENAME NODE_CHECKSUM
+    NODE_WORKDIR="$(mktemp -d)"
+    if ! download_file "${NODE_BASE%/}/latest-v${NODE_VERSION}.x/SHASUMS256.txt" "${NODE_WORKDIR}/SHASUMS256.txt"; then
+        rm -rf "${NODE_WORKDIR}"
+        return 1
     fi
-    info "Node.js 版本: v${NODE_FULL_VERSION}"
-
-    local NODE_URL="https://nodejs.org/dist/v${NODE_FULL_VERSION}/node-v${NODE_FULL_VERSION}-${NODE_DISTRO}-${NODE_ARCH}.tar.xz"
-    local NODE_TARBALL="/tmp/node-v${NODE_FULL_VERSION}.tar.xz"
-
-    info "下载 ${NODE_URL} ..."
-    if curl -fsSL "${NODE_URL}" -o "${NODE_TARBALL}"; then
+    NODE_FILENAME="$(awk -v suffix="-${NODE_DISTRO}-${NODE_ARCH}.tar.xz" 'index($2, suffix) && substr($2, length($2)-length(suffix)+1)==suffix {print $2; exit}' "${NODE_WORKDIR}/SHASUMS256.txt")"
+    if ! [[ "$NODE_FILENAME" =~ ^node-v[0-9]+\.[0-9]+\.[0-9]+-[a-z0-9]+-[a-z0-9]+\.tar\.xz$ ]]; then
+        fail "Node.js 下载清单无效或没有匹配的架构"
+        rm -rf "${NODE_WORKDIR}"
+        return 1
+    fi
+    NODE_FULL_VERSION="${NODE_FILENAME#node-v}"
+    NODE_FULL_VERSION="${NODE_FULL_VERSION%%-*}"
+    local NODE_URL="${NODE_BASE%/}/v${NODE_FULL_VERSION}/${NODE_FILENAME}"
+    local NODE_TARBALL="${NODE_WORKDIR}/${NODE_FILENAME}"
+    if download_file "${NODE_URL}" "${NODE_TARBALL}"; then
+        NODE_CHECKSUM="$(awk -v file="$NODE_FILENAME" '$2==file {print $1; exit}' "${NODE_WORKDIR}/SHASUMS256.txt")"
+        if ! (cd "$NODE_WORKDIR" && printf '%s  %s\n' "$NODE_CHECKSUM" "$NODE_FILENAME" | sha256sum -c -); then
+            fail "Node.js 校验失败"
+            rm -rf "${NODE_WORKDIR}"
+            return 1
+        fi
         ok "下载完成"
 
         info "解压到 ${NODE_INSTALL_PREFIX} ..."
         tar -xJf "${NODE_TARBALL}" -C "${NODE_INSTALL_PREFIX}" --strip-components=1
-        rm -f "${NODE_TARBALL}"
+        rm -rf "${NODE_WORKDIR}"
         configure_venv_toolchain
 
         ok "Node.js $("${NODE_BIN}" --version 2>/dev/null)"
@@ -378,13 +343,15 @@ install_nodejs() {
         ok "Node.js 已安装到 venv: ${NODE_INSTALL_PREFIX}"
     else
         fail "Node.js 下载失败, 请检查网络"
-        warn "你可以手动安装 Node.js 后重新运行本脚本"
+        warn "可通过 NODE_DIST_URL 设置可访问的下载源"
+        rm -rf "${NODE_WORKDIR}"
+        return 1
     fi
 }
 
 # ---- 3. Claude Code CLI 安装 ----
 install_claude_code() {
-    step "3/10" "Claude Code CLI 安装"
+    step "3/8" "Claude Code CLI 安装"
     configure_venv_toolchain
     local CLAUDE_BIN="${NODE_INSTALL_PREFIX}/bin/claude"
 
@@ -405,32 +372,9 @@ install_claude_code() {
     fi
 }
 
-# ---- 4. Gemini CLI 安装 ----
-install_gemini_cli() {
-    step "4/10" "Gemini CLI 安装"
-    configure_venv_toolchain
-    local GEMINI_BIN="${NODE_INSTALL_PREFIX}/bin/gemini"
-
-    if [ -x "${GEMINI_BIN}" ]; then
-        ok "gemini 已安装: $("${GEMINI_BIN}" --version 2>/dev/null || echo 'version check skipped')"
-    else
-        info "通过 venv npm 安装 @google/gemini-cli ..."
-        npm_install_global @google/gemini-cli
-        ok "Gemini CLI 安装完成"
-    fi
-
-    GEMINI_PATH="${GEMINI_BIN}"
-    if [ -x "${GEMINI_PATH}" ]; then
-        ok "gemini 路径: ${GEMINI_PATH}"
-    else
-        warn "未能检测到 gemini 命令, 可能需要重启终端或手动加入 PATH"
-    fi
-
-}
-
-# ---- 5. Codex CLI 安装 ----
+# ---- 4. Codex CLI 安装 ----
 install_codex_cli() {
-    step "5/10" "Codex CLI 安装"
+    step "4/8" "Codex CLI 安装"
     configure_venv_toolchain
     local CODEX_BIN="${NODE_INSTALL_PREFIX}/bin/codex"
 
@@ -450,9 +394,9 @@ install_codex_cli() {
     fi
 }
 
-# ---- 6. GitHub 认证配置 ----
+# ---- 5. GitHub 认证配置 ----
 setup_github_auth() {
-    step "6/10" "GitHub 认证配置 (git + gh CLI + SSH)"
+    step "5/8" "GitHub 认证配置 (git + gh CLI + SSH)"
     configure_venv_toolchain
     local GH_BIN="${NODE_INSTALL_PREFIX}/bin/gh"
 
@@ -495,15 +439,6 @@ setup_github_auth() {
             fi
         fi
 
-        # 尝试方式 2: npm 安装
-        if [ "${GH_INSTALLED}" = false ]; then
-            info "尝试通过 venv npm 安装 gh..."
-            if npm_install_global @github/gh; then
-                GH_INSTALLED=true
-                ok "gh CLI (npm) 安装完成"
-            fi
-        fi
-
         if [ "${GH_INSTALLED}" = false ]; then
             warn "gh CLI 安装失败, 请手动安装到 ${NODE_INSTALL_PREFIX}/bin/gh: https://github.com/cli/cli/releases"
         fi
@@ -513,8 +448,11 @@ setup_github_auth() {
     info "配置 GitHub SSH host key..."
     mkdir -p "${HOME}/.ssh"
     if ! grep -q "github.com" "${HOME}/.ssh/known_hosts" 2>/dev/null; then
-        ssh-keyscan github.com >> "${HOME}/.ssh/known_hosts" 2>/dev/null
-        ok "GitHub SSH host key 已添加"
+        if ssh-keyscan -T 5 github.com >> "${HOME}/.ssh/known_hosts" 2>/dev/null; then
+            ok "GitHub SSH host key 已添加"
+        else
+            warn "GitHub SSH 不可达, 可使用 HTTPS 认证"
+        fi
     else
         ok "GitHub SSH host key 已存在"
     fi
@@ -598,16 +536,16 @@ setup_github_auth() {
                 warn "gh auth login 失败, 请稍后手动认证"
             }
         else
-            info "跳过 GitHub 认证 (插件安装步骤仍会使用 HTTPS 克隆公开仓库)"
+            info "跳过 GitHub 认证"
         fi
     fi
 
     ok "GitHub 认证配置完成"
 }
 
-# ---- 7. API Key 配置 ----
+# ---- 6. API Key 配置 ----
 setup_api_key() {
-    step "7/10" "API Key 配置 (Claude + Gemini + Codex + GitHub)"
+    step "6/8" "API Key 配置 (Claude + Codex + GitHub)"
 
     if [ ! -f "${ENV_EXAMPLE}" ]; then
         info "创建 .env.example 模板..."
@@ -617,6 +555,21 @@ setup_api_key() {
 #  复制此文件为 .env 并填入你的真实密钥
 #  cp .env.example .env
 # ============================================
+
+# ---- 下载网络设置 (可选，两个脚本在下载前加载 .env) ----
+# 通用 HTTP 代理，按本机代理端口修改
+# HTTPS_PROXY=http://127.0.0.1:7890
+# HTTP_PROXY=http://127.0.0.1:7890
+# DOWNLOAD_ATTEMPTS=3
+# DOWNLOAD_CONNECT_TIMEOUT=15
+# DOWNLOAD_MAX_TIME=600
+# DOWNLOAD_RETRY_DELAY=2
+# DOWNLOAD_IPV4=1
+# 自行指定可访问的源；不自动切换到第三方镜像
+# NPM_REGISTRY=https://registry.npmjs.org
+# NODE_DIST_URL=https://nodejs.org/dist
+# MINICONDA_BASE_URL=https://repo.anaconda.com/miniconda
+# UV_INSTALLER_URL=https://astral.sh/uv/install.sh
 
 # ---- Claude Code (Anthropic 兼容 API) ----
 # 使用第三方 API 代理 (如 DeepSeek)
@@ -636,15 +589,8 @@ GITHUB_TOKEN=your-github-token-here
 
 # ---- GitHub 下载代理 (可选) ----
 # 国内访问 GitHub 慢时可启用, 如 https://ghproxy.net 或 https://ghproxy.com
-# uv 版会用于 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆
+# uv 版会用于 gh Release 下载
 # GITHUB_PROXY_URL=https://ghproxy.net
-
-# ---- Gemini CLI ----
-# 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
-GEMINI_AUTH_METHOD=login
-# 如果使用 api_key 方式, 取消下面这行的注释并填入 key
-# 获取: https://aistudio.google.com/apikey
-# GEMINI_API_KEY=your-gemini-api-key-here
 
 # ---- Codex CLI (OpenAI) ----
 # 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
@@ -679,16 +625,13 @@ EOF
         echo -e "  方式二: 设置环境变量"
         echo -e "    export ANTHROPIC_AUTH_TOKEN='your-deepseek-key'"
         echo ""
-        echo -e "  ${CYAN}▸ Gemini / Codex 默认使用浏览器 OAuth 登录, 无需 API Key${NC}"
+        echo -e "  ${CYAN}▸ Codex 默认使用浏览器 OAuth 登录, 无需 API Key${NC}"
         echo -e "  如需 API Key 方式, 在 .env 中设置:"
-        echo -e "    GEMINI_AUTH_METHOD=api_key"
-        echo -e "    GEMINI_API_KEY=your-gemini-key"
         echo -e "    CODEX_AUTH_METHOD=api_key"
         echo -e "    OPENAI_API_KEY=your-openai-key"
         echo ""
         echo -e "  获取 API Key:"
         echo -e "    DeepSeek:  ${CYAN}https://platform.deepseek.com/api_keys${NC}"
-        echo -e "    Gemini:    ${CYAN}https://aistudio.google.com/apikey${NC}"
         echo -e "    OpenAI:    ${CYAN}https://platform.openai.com/api-keys${NC}"
         echo -e "    GitHub:    ${CYAN}https://github.com/settings/tokens${NC}"
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -706,9 +649,9 @@ EOF
     fi
 }
 
-# ---- 8. 环境变量加载 (从 .env 文件) ----
+# ---- 7. 环境变量加载 (从 .env 文件) ----
 load_env_vars() {
-    step "8/10" "加载环境变量"
+    step "7/8" "加载环境变量"
 
     if [ -f "${ENV_FILE}" ]; then
         info "从 ${ENV_FILE} 加载配置..."
@@ -725,15 +668,6 @@ load_env_vars() {
             warn "ANTHROPIC_AUTH_TOKEN 未设置或仍是占位符"
         fi
 
-        # Gemini CLI
-        if [ "${GEMINI_AUTH_METHOD}" = "login" ]; then
-            ok "Gemini CLI 使用浏览器 OAuth 登录"
-        elif [ -n "${GEMINI_API_KEY}" ] && [ "${GEMINI_API_KEY}" != "your-gemini-api-key-here" ]; then
-            ok "Gemini CLI 已配置 (API Key)"
-        else
-            warn "GEMINI_API_KEY 未设置或仍是占位符"
-        fi
-
         # Codex CLI
         if [ "${CODEX_AUTH_METHOD}" = "login" ]; then
             ok "Codex CLI 使用浏览器 OAuth 登录"
@@ -748,7 +682,7 @@ load_env_vars() {
             ok "GitHub Token 已配置"
             export GH_TOKEN="${GITHUB_TOKEN}"
         else
-            warn "GITHUB_TOKEN 未设置或仍是占位符 (插件安装不受影响, 但 git push 需要)"
+            warn "GITHUB_TOKEN 未设置或仍是占位符 (git push 需要认证)"
         fi
 
         if [ -n "${GITHUB_PROXY_URL:-}" ]; then
@@ -760,9 +694,9 @@ load_env_vars() {
     fi
 }
 
-# ---- 9. Claude Code 配置恢复 ----
+# ---- 8. Claude Code 配置恢复 ----
 restore_config() {
-    step "9/10" "Claude Code 配置恢复"
+    step "8/8" "Claude Code 配置恢复"
 
     # 创建目录
     if [ ! -d "${CLAUDE_DIR}" ]; then
@@ -784,71 +718,6 @@ restore_config() {
     fi
 }
 
-# ---- 10. Claude Code 插件自动安装 ----
-install_plugins() {
-    step "10/10" "Claude Code 插件自动安装"
-
-    CLAUDE_BIN="${NODE_INSTALL_PREFIX}/bin/claude"
-    if [ ! -x "${CLAUDE_BIN}" ]; then
-        warn "venv claude 命令未找到, 跳过插件安装"
-        return
-    fi
-
-    info "添加 marketplaces ..."
-    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-        info "Claude marketplace GitHub 克隆使用代理: ${GITHUB_PROXY_URL}"
-    fi
-
-    # 添加 marketplaces (幂等操作, 已存在则跳过)
-    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
-        ok "marketplace claude-plugins-official 已就绪"
-    else
-        warn "marketplace claude-plugins-official 添加失败"
-    fi
-
-    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/tanweai/pua 2>&1; then
-        ok "marketplace pua-skills 已就绪"
-    else
-        warn "marketplace pua-skills 添加失败"
-    fi
-
-    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
-        ok "marketplace omc 已就绪"
-    else
-        warn "marketplace omc 添加失败"
-    fi
-
-    if run_with_github_proxy "${CLAUDE_BIN}" plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
-        ok "marketplace claude-hud 已就绪"
-    else
-        warn "marketplace claude-hud 添加失败"
-    fi
-
-    ok "marketplaces 配置完成"
-
-    info "安装插件 (可能需要几分钟)..."
-
-    PLUGINS=(
-        "code-review@claude-plugins-official"
-        "github@claude-plugins-official"
-        "skill-creator@claude-plugins-official"
-        "pua@pua-skills"
-        "oh-my-claudecode@omc"
-        "claude-hud@claude-hud"
-    )
-
-    for plugin in "${PLUGINS[@]}"; do
-        info "安装 ${plugin} ..."
-        if "${CLAUDE_BIN}" plugin install "${plugin}" 2>&1; then
-            ok "${plugin} 安装成功"
-        else
-            warn "${plugin} 安装失败 (可稍后手动: claude plugin install ${plugin})"
-        fi
-    done
-
-    ok "插件安装流程完成"
-}
-
 # ---- 完成提示 ----
 print_summary() {
     echo ""
@@ -865,7 +734,6 @@ print_summary() {
     echo -e "    Node.js:      $("${NODE_INSTALL_PREFIX}/bin/node" --version 2>/dev/null || echo 'unknown')"
     echo -e "    npm:          $("${NODE_INSTALL_PREFIX}/bin/npm" --version 2>/dev/null || echo 'unknown')"
     echo -e "    Claude Code:   ${GREEN}claude${NC}"
-    echo -e "    Gemini CLI:    ${GREEN}gemini${NC}"
     echo -e "    Codex CLI:     ${GREEN}codex${NC}"
     echo -e "    配置目录:      ${CLAUDE_DIR}"
     echo ""
@@ -886,19 +754,7 @@ print_summary() {
     echo -e "  ${CYAN}启动方式:${NC}"
     echo -e "    ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
     echo -e "    claude"
-    echo -e "    gemini"
     echo -e "    codex"
-    echo ""
-
-    echo -e "  ${CYAN}各 CLI 扩展/插件安装状态:${NC}"
-    echo ""
-    echo -e "    ${GREEN}Claude Code (6 插件):${NC} code-review, github, skill-creator, pua, oh-my-claudecode, claude-hud"
-    echo -e "    ${GREEN}Gemini CLI:${NC} 未自动安装扩展"
-    echo -e "    ${YELLOW}Codex CLI:${NC} 未自动安装插件"
-    echo ""
-
-    echo -e "  ${CYAN}重新加载 Claude Code 插件 (如需要):${NC}"
-    echo -e "    进入 Claude Code 后执行 /plugin reload"
     echo ""
 
     echo -e "  ${CYAN}▸ 环境变量已配置:${NC}"
@@ -929,13 +785,11 @@ main() {
     setup_venv
     install_nodejs
     install_claude_code
-    install_gemini_cli
     install_codex_cli
     setup_github_auth
     setup_api_key
     load_env_vars
     restore_config
-    install_plugins
     print_summary
 }
 

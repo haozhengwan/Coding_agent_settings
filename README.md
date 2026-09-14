@@ -1,6 +1,6 @@
 # haozhengwan's AI CLI 工具一键部署
 
-一键部署 Claude Code + Gemini CLI + Codex CLI 开发环境 + 配置恢复。
+一键部署 Claude Code + Codex CLI 开发环境 + 配置恢复。
 
 ## 快速开始 (新机器)
 
@@ -35,25 +35,21 @@ source ~/.venv/claude/bin/activate
 脚本会按顺序完成:
 1. **系统检查** — 安装 curl/wget/git 等基础工具
 2. **环境安装** — conda (conda 版) 或 uv + venv + Node.js (uv 版, Node.js 位于 venv 内)
-3. **Claude Code CLI** — 在 venv npm prefix 下安装 `@anthropic-ai/claude-code`
-4. **Gemini CLI** — 在 venv npm prefix 下安装 `@google/gemini-cli`
-5. **Codex CLI** — 在 venv npm prefix 下安装 `@openai/codex`
-6. **GitHub 认证** — git + gh CLI + SSH 配置
-7. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Gemini/Codex 三种 key)
-8. **环境变量加载** — 从 `.env` 加载并验证配置
-9. **配置恢复** — settings.json + keybindings.json
-10. **插件自动安装** — 命令行自动安装 7 个 Claude Code 插件
+3. **Claude Code CLI** — 在所选环境中安装 `@anthropic-ai/claude-code`
+4. **Codex CLI** — 在所选环境中安装 `@openai/codex`
+5. **GitHub 认证** — git + gh CLI + SSH 配置
+6. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Codex 两种 key)
+7. **环境变量加载** — 从 `.env` 加载并验证配置
+8. **配置恢复** — settings.json + keybindings.json
 
 ## 目录结构
 
 ```
 ├── config/                    # 配置文件
-│   ├── settings.json          # 全局设置 (插件, 权限, 主题)
+│   ├── settings.json          # 全局设置 (主题)
 │   └── keybindings.json       # 键盘快捷键
-├── plugins/                   # 插件信息
-│   ├── installed_plugins.json # 已安装插件列表
-│   ├── known_marketplaces.json# 市场源地址
-│   └── plugin-list.md         # 插件详细说明
+├── lib/network.sh            # 共享下载与 npm 重试函数
+├── tests/test_network.py     # 离线网络故障回归检查
 ├── .env.example               # API Key 模板 (可安全提交)
 ├── .env                       # 你的真实 API Key (gitignore 已排除)
 ├── restore.sh                 # conda 版一键部署脚本
@@ -61,6 +57,42 @@ source ~/.venv/claude/bin/activate
 ├── MANIFEST.md                # 完整文件清单
 ├── .gitignore
 └── README.md                  # 本文件
+```
+
+## 下载失败与代理配置
+
+两个脚本在下载前读取 `.env`，网络设置也可作为环境变量传入。文件下载默认最多尝试 3 次，连接超时 15 秒，每次传输最长 600 秒。失败的临时文件会清理，只有完整且非空的下载才替换目标文件。npm 使用自身的重试机制并显示错误输出。
+
+如本机已有 HTTP 代理，可设置实际端口后运行：
+
+```bash
+HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 bash restore_uv.sh
+# conda 版同样支持
+HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 bash restore.sh
+```
+
+| 变量 | 默认值 | 用途 |
+|------|--------|------|
+| `DOWNLOAD_ATTEMPTS` | `3` | 每个文件的下载尝试次数 |
+| `DOWNLOAD_CONNECT_TIMEOUT` | `15` | 每次连接超时（秒） |
+| `DOWNLOAD_MAX_TIME` | `600` | 每次传输超时（秒） |
+| `DOWNLOAD_RETRY_DELAY` | `2` | 文件下载重试间隔（秒） |
+| `DOWNLOAD_IPV4` | `0` | 设为 `1` 强制文件下载使用 IPv4 |
+| `NPM_REGISTRY` | npm 当前配置 | Claude Code / Codex npm 包下载源 |
+| `NODE_DIST_URL` | `https://nodejs.org/dist` | uv 版 Node.js 下载根目录，需包含版本目录及校验清单 |
+| `MINICONDA_BASE_URL` | `https://repo.anaconda.com/miniconda` | conda 安装器下载根目录 |
+| `UV_INSTALLER_URL` | `https://astral.sh/uv/install.sh` | uv 安装脚本地址 |
+
+下载源可改为你能访问的镜像；脚本不自动选择第三方镜像。`GITHUB_PROXY_URL` 仅用于 uv 版 gh Release 文件，失败后尝试官方地址，不代理 npm、Node.js 或 uv 安装器内部的下载。uv/Python 和 conda 包下载仍由各自工具处理，可使用通用 HTTP 代理及各自的源配置。文件重试参数不控制这些包管理器。
+
+uv 版 Node.js 从下载源的完整清单选取版本并校验 SHA-256；查询、下载或校验失败时停止，不再使用旧的硬编码版本。校验用于检测文件损坏，镜像源本身应可信。
+
+网络参数依据 [curl 文档](https://curl.se/docs/manpage.html) 和 [npm 配置文档](https://docs.npmjs.com/cli/v11/using-npm/config/)。
+
+运行离线回归检查：
+
+```bash
+python3 -m unittest discover -s tests -v
 ```
 
 ## 自定义变量
@@ -88,7 +120,7 @@ GITHUB_PROXY_URL=https://ghproxy.net bash restore_uv.sh
 | `NODE_VERSION` | `20` | Node.js 版本 (20 LTS) |
 | `PYTHON_VERSION` | `3.12` | Python 版本 (uv 可自动下载) |
 | `NODE_INSTALL_PREFIX` | `VENV_DIR` | Node.js 和 npm 全局 CLI 安装路径, 默认在 uv venv 内 |
-| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 uv 版 gh Release 下载、Gemini 扩展和 Claude marketplace 克隆 |
+| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 uv 版 gh Release 下载 |
 
 ### conda 版专属变量 (`restore.sh`)
 
@@ -130,21 +162,6 @@ bash restore.sh
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `deepseek-v4-flash` | Haiku 级别模型 |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | `deepseek-v4-flash` | Subagent 使用的模型 |
 
-### Gemini CLI 配置
-
-**默认使用浏览器 OAuth 登录，无需 API Key。** 首次运行 `gemini` 时会自动打开浏览器完成认证。
-
-如需使用 API Key 方式：
-
-```bash
-GEMINI_AUTH_METHOD=api_key GEMINI_API_KEY=your-key bash restore.sh
-```
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `GEMINI_AUTH_METHOD` | `login` | 认证方式: `login` (浏览器OAuth) 或 `api_key` |
-| `GEMINI_API_KEY` | (空) | Gemini API Key ([获取](https://aistudio.google.com/apikey)) |
-
 ### Codex CLI 配置
 
 **默认使用浏览器 OAuth 登录，无需 API Key。** 首次运行 `codex` 时会自动打开浏览器完成认证。
@@ -164,7 +181,6 @@ CODEX_AUTH_METHOD=api_key OPENAI_API_KEY=your-key bash restore.sh
 
 ```bash
 ANTHROPIC_AUTH_TOKEN=sk-deepseek-xxx \
-bash restore.sh
 bash restore.sh
 ```
 
@@ -188,10 +204,6 @@ GITHUB_TOKEN=your-github-token-here
 # ---- GitHub 下载代理 (可选, uv 版) ----
 # GITHUB_PROXY_URL=https://ghproxy.net
 
-# ---- Gemini CLI (默认浏览器 OAuth 登录, 无需 API Key) ----
-GEMINI_AUTH_METHOD=login
-# GEMINI_API_KEY=your-gemini-api-key-here
-
 # ---- Codex CLI (默认浏览器 OAuth 登录, 无需 API Key) ----
 CODEX_AUTH_METHOD=login
 # OPENAI_API_KEY=your-openai-api-key-here
@@ -204,43 +216,9 @@ cp .env.example .env
 vim .env
 ```
 
-## 各 CLI 安装内容
+## 安装范围
 
-脚本为三个 CLI **各自安装扩展/插件**，功能互不重叠:
-
----
-
-### 🤖 Claude Code — 6 插件 + 4 市场 (脚本自动安装)
-
-| 插件 | 市场 | 版本 | 说明 |
-|------|------|------|------|
-| code-review | claude-plugins-official | - | 代码审查 |
-| github | claude-plugins-official | - | GitHub 集成 (PR/Issue) |
-| skill-creator | claude-plugins-official | - | 创建自定义技能 |
-| pua | pua-skills | 3.4.6 | PUA 高效工作流 (13 种企业文化风格) |
-| oh-my-claudecode | omc | 4.14.4 | 增强工具集 (30+ MCP 工具, 32+ Agent 类型) |
-| claude-hud | claude-hud | 0.1.0 | 终端状态栏 (模型/token/session) |
-
-**Marketplace 源:**
-
-| 市场 | 来源 |
-|------|------|
-| claude-plugins-official | `anthropics/claude-plugins-official` |
-| pua-skills | `tanweai/pua` |
-| omc | `Yeachan-Heo/oh-my-claudecode` |
-| claude-hud | `jarrodwatts/claude-hud` |
-
----
-
-### 🔮 Gemini CLI
-
-脚本不自动安装 Gemini 扩展。
-
----
-
-### ⚡ Codex CLI
-
-脚本不自动安装 Codex 插件。
+仅安装 Claude Code 和 Codex CLI，不安装插件、扩展或 marketplace。
 
 ## 手动恢复 (仅配置文件)
 
@@ -259,7 +237,6 @@ cp config/keybindings.json ~/.claude/
 ```bash
 conda activate claude
 claude     # Claude Code
-gemini     # Gemini CLI
 codex      # Codex CLI
 ```
 
@@ -270,16 +247,7 @@ CLI 工具安装在 uv venv 的 `bin/` 目录内，激活 venv 后使用:
 ```bash
 source ~/.venv/claude/bin/activate  # 或自定义的 VENV_DIR
 claude     # Claude Code
-gemini     # Gemini CLI
 codex      # Codex CLI
-```
-
-### 通用
-
-插件已自动安装并加载，无需手动操作。如需重新加载插件：
-
-```
-/plugin reload
 ```
 
 ## 快速环境变量导入
@@ -288,10 +256,12 @@ codex      # Codex CLI
 
 ```bash
 # conda 版
-source .env && conda activate claude
+set -a; source .env; set +a
+conda activate claude
 
 # uv 版
-source .env && source ~/.venv/claude/bin/activate
+set -a; source .env; set +a
+source ~/.venv/claude/bin/activate
 ```
 
 ## 环境要求 (脚本会自动安装)
@@ -299,9 +269,9 @@ source .env && source ~/.venv/claude/bin/activate
 ### conda 版
 - Linux (x86_64/aarch64) 或 macOS
 - 网络连接
-- 脚本会自动安装: curl, wget, git, Miniconda, Node.js, Claude Code CLI, Gemini CLI, Codex CLI
+- 脚本会自动安装: curl, wget, git, Miniconda, Node.js, Claude Code CLI, Codex CLI
 
 ### uv 版
 - Linux (x86_64/aarch64)
 - 网络连接
-- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, venv 内 Node.js, venv 内 Claude Code CLI, Gemini CLI, Codex CLI
+- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, venv 内 Node.js, venv 内 Claude Code CLI, Codex CLI

@@ -1,35 +1,3 @@
 {
-  "enabledPlugins": {
-    "code-review@claude-plugins-official": true,
-    "github@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true,
-    "pua@pua-skills": true,
-    "oh-my-claudecode@omc": true,
-    "claude-hud@claude-hud": true
-  },
-  "extraKnownMarketplaces": {
-    "pua-skills": {
-      "source": {
-        "source": "github",
-        "repo": "tanweai/pua"
-      }
-    },
-    "omc": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/Yeachan-Heo/oh-my-claudecode.git"
-      }
-    },
-    "claude-hud": {
-      "source": {
-        "source": "github",
-        "repo": "jarrodwatts/claude-hud"
-      }
-    }
-  },
-  "theme": "dark",
-  "statusLine": {
-    "type": "command",
-    "command": "bash -c 'cols=$(stty size </dev/tty 2>/dev/null | awk '\"'\"'{print }'\"'\"'); export COLUMNS=$(( ${cols:-120} > 4 ? ${cols:-120} - 4 : 1 )); plugin_dir=$(ls -d \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}\"/plugins/cache/*/claude-hud/*/ 2>/dev/null | awk -F/ '\"'\"'{ print $(NF-1) \"\\t\" $(0) }'\"'\"' | grep -E '\"'\"'^[0-9]+\\.[0-9]+\\.[0-9]+[[:space:]]'\"'\"' | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n | tail -1 | cut -f2-); exec node \"${plugin_dir}dist/index.js\"'"
-  }
+  "theme": "dark"
 }

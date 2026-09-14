@@ -1,7 +1,7 @@
 #!/bin/bash
 # ============================================================
-#  AI CLI 工具一键部署脚本 (10 步)
-#  涵盖: Anaconda → Node.js → Claude Code / Gemini CLI / Codex CLI → GitHub 认证 → API Key → 配置恢复 → 插件安装
+#  AI CLI 工具一键部署脚本 (8 步)
+#  涵盖: Anaconda → Node.js → Claude Code / Codex CLI → GitHub 认证 → API Key → 配置恢复
 # ============================================================
 set -eo pipefail
 
@@ -20,11 +20,6 @@ ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-deepseek-v4-pr
 ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-deepseek-v4-flash}"
 CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-deepseek-v4-flash}"
 
-# ---- Gemini CLI 配置 (可修改) ----
-# 认证方式: "login" (浏览器OAuth, 默认) 或 "api_key"
-GEMINI_AUTH_METHOD="${GEMINI_AUTH_METHOD:-login}"
-GEMINI_API_KEY="${GEMINI_API_KEY:-}"
-
 # ---- Codex CLI 配置 (可修改) ----
 # 认证方式: "login" (浏览器OAuth, 默认) 或 "api_key"
 CODEX_AUTH_METHOD="${CODEX_AUTH_METHOD:-login}"
@@ -34,6 +29,7 @@ CLAUDE_DIR="${HOME}/.claude"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 ENV_EXAMPLE="${SCRIPT_DIR}/.env.example"
+source "${SCRIPT_DIR}/lib/network.sh"
 
 # ---- 颜色 ----
 RED='\033[0;31m'
@@ -54,14 +50,14 @@ banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}   AI CLI 工具一键部署                   ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}   Claude Code + Gemini CLI + Codex CLI  ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   Claude Code + Codex CLI               ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
 }
 
 # ---- 1. 系统环境检查 ----
 check_system() {
-    step "1/10" "系统环境检查"
+    step "1/8" "系统环境检查"
 
     OS="$(uname -s)"
     ARCH="$(uname -m)"
@@ -118,7 +114,7 @@ check_system() {
 
 # ---- 2. Anaconda/Miniconda 安装 ----
 install_conda() {
-    step "2/10" "Anaconda/Miniconda 环境"
+    step "2/8" "Anaconda/Miniconda 环境"
 
     # 如果 conda 已存在
     if command -v conda &>/dev/null; then
@@ -138,10 +134,10 @@ install_conda() {
 
         case "${OS}" in
             Linux)
-                CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${ARCH}"
+                CONDA_URL="${MINICONDA_BASE_URL:-https://repo.anaconda.com/miniconda}/Miniconda3-latest-Linux-${ARCH}.sh"
                 ;;
             Darwin)
-                CONDA_URL="https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-${ARCH}"
+                CONDA_URL="${MINICONDA_BASE_URL:-https://repo.anaconda.com/miniconda}/Miniconda3-latest-MacOSX-${ARCH}.sh"
                 ;;
             *)
                 fail "不支持的操作系统: ${OS}"
@@ -151,7 +147,7 @@ install_conda() {
 
         CONDA_INSTALLER="/tmp/miniconda_installer.sh"
         info "下载 ${CONDA_URL}"
-        curl -fsSL "${CONDA_URL}" -o "${CONDA_INSTALLER}" || {
+        download_file "${CONDA_URL}" "${CONDA_INSTALLER}" || {
             fail "下载失败, 请检查网络或手动安装 Anaconda: https://www.anaconda.com/download"
             exit 1
         }
@@ -175,19 +171,19 @@ install_conda() {
         ok "conda 环境 '${CONDA_ENV_NAME}' 已存在"
     else
         info "创建 conda 环境 '${CONDA_ENV_NAME}' (Python ${PYTHON_VERSION})..."
-        conda create -n "${CONDA_ENV_NAME}" python="${PYTHON_VERSION}" -y > /dev/null 2>&1
+        conda create -n "${CONDA_ENV_NAME}" python="${PYTHON_VERSION}" -y
         ok "conda 环境 '${CONDA_ENV_NAME}' 创建完成"
     fi
 
     # 安装 Node.js
     info "在 '${CONDA_ENV_NAME}' 环境中安装 Node.js ${NODE_VERSION}..."
-    conda install -n "${CONDA_ENV_NAME}" "nodejs=${NODE_VERSION}" -c conda-forge -y > /dev/null 2>&1
+    conda install -n "${CONDA_ENV_NAME}" "nodejs=${NODE_VERSION}" -c conda-forge -y
     ok "Node.js $($(conda run -n "${CONDA_ENV_NAME}" which node) --version 2>/dev/null)"
     ok "npm $($(conda run -n "${CONDA_ENV_NAME}" which npm) --version 2>/dev/null)"
 
-    # 安装 git (插件 marketplace 克隆必需)
+    # 安装 git (版本控制工具)
     info "在 '${CONDA_ENV_NAME}' 环境中安装 git..."
-    conda install -n "${CONDA_ENV_NAME}" git -c conda-forge -y > /dev/null 2>&1
+    conda install -n "${CONDA_ENV_NAME}" git -c conda-forge -y
     ok "git $(conda run -n "${CONDA_ENV_NAME}" git --version 2>/dev/null)"
 
     # 导出 NODE_PATH 供后续步骤使用
@@ -197,13 +193,13 @@ install_conda() {
 
 # ---- 3. Claude Code CLI 安装 ----
 install_claude_code() {
-    step "3/10" "Claude Code CLI 安装"
+    step "3/8" "Claude Code CLI 安装"
 
     if command -v claude &>/dev/null; then
         ok "claude 已安装: $(claude --version 2>/dev/null || echo 'version check skipped')"
     else
         info "通过 npm 安装 @anthropic-ai/claude-code ..."
-        conda run -n "${CONDA_ENV_NAME}" npm install -g @anthropic-ai/claude-code > /dev/null 2>&1
+        npm_install_with_retry @anthropic-ai/claude-code conda run -n "${CONDA_ENV_NAME}" npm
         ok "Claude Code CLI 安装完成"
     fi
 
@@ -216,36 +212,15 @@ install_claude_code() {
     fi
 }
 
-# ---- 4. Gemini CLI 安装 ----
-install_gemini_cli() {
-    step "4/10" "Gemini CLI 安装"
-
-    if conda run -n "${CONDA_ENV_NAME}" which gemini &>/dev/null; then
-        ok "gemini 已安装: $(conda run -n "${CONDA_ENV_NAME}" gemini --version 2>/dev/null || echo 'version check skipped')"
-    else
-        info "通过 npm 安装 @google/gemini-cli ..."
-        conda run -n "${CONDA_ENV_NAME}" npm install -g @google/gemini-cli > /dev/null 2>&1
-        ok "Gemini CLI 安装完成"
-    fi
-
-    GEMINI_PATH="$(conda run -n "${CONDA_ENV_NAME}" which gemini 2>/dev/null || echo '')"
-    if [ -n "${GEMINI_PATH}" ]; then
-        ok "gemini 路径: ${GEMINI_PATH}"
-    else
-        warn "未能检测到 gemini 命令, 可能需要重启终端或手动加入 PATH"
-    fi
-
-}
-
-# ---- 5. Codex CLI 安装 ----
+# ---- 4. Codex CLI 安装 ----
 install_codex_cli() {
-    step "5/10" "Codex CLI 安装"
+    step "4/8" "Codex CLI 安装"
 
     if conda run -n "${CONDA_ENV_NAME}" which codex &>/dev/null; then
         ok "codex 已安装: $(conda run -n "${CONDA_ENV_NAME}" codex --version 2>/dev/null || echo 'version check skipped')"
     else
         info "通过 npm 安装 @openai/codex ..."
-        conda run -n "${CONDA_ENV_NAME}" npm install -g @openai/codex > /dev/null 2>&1
+        npm_install_with_retry @openai/codex conda run -n "${CONDA_ENV_NAME}" npm
         ok "Codex CLI 安装完成"
     fi
 
@@ -256,9 +231,9 @@ install_codex_cli() {
         warn "未能检测到 codex 命令, 可能需要重启终端或手动加入 PATH"
     fi
 }
-# ---- 6. GitHub 认证配置 ----
+# ---- 5. GitHub 认证配置 ----
 setup_github_auth() {
-    step "6/10" "GitHub 认证配置 (git + gh CLI + SSH)"
+    step "5/8" "GitHub 认证配置 (git + gh CLI + SSH)"
 
     # 修复 git 安全目录问题 (常见于 root/sudo 场景)
     info "配置 git 安全目录..."
@@ -271,11 +246,10 @@ setup_github_auth() {
         ok "gh CLI 已安装: $(gh --version 2>/dev/null | head -1)"
     else
         info "在 '${CONDA_ENV_NAME}' 环境中安装 GitHub CLI (gh)..."
-        if conda install -n "${CONDA_ENV_NAME}" gh -c conda-forge -y > /dev/null 2>&1; then
+        if conda install -n "${CONDA_ENV_NAME}" gh -c conda-forge -y; then
             ok "gh CLI 安装完成: $(conda run -n "${CONDA_ENV_NAME}" gh --version 2>/dev/null | head -1)"
         else
-            warn "gh CLI 安装失败, 尝试用 pip..."
-            conda run -n "${CONDA_ENV_NAME}" pip install gh 2>/dev/null || warn "gh CLI 安装失败, 请手动安装: https://github.com/cli/cli"
+            warn "gh CLI 安装失败, 请手动安装: https://github.com/cli/cli"
         fi
     fi
 
@@ -283,8 +257,11 @@ setup_github_auth() {
     info "配置 GitHub SSH host key..."
     mkdir -p "${HOME}/.ssh"
     if ! grep -q "github.com" "${HOME}/.ssh/known_hosts" 2>/dev/null; then
-        ssh-keyscan github.com >> "${HOME}/.ssh/known_hosts" 2>/dev/null
-        ok "GitHub SSH host key 已添加"
+        if ssh-keyscan -T 5 github.com >> "${HOME}/.ssh/known_hosts" 2>/dev/null; then
+            ok "GitHub SSH host key 已添加"
+        else
+            warn "GitHub SSH 不可达, 可使用 HTTPS 认证"
+        fi
     else
         ok "GitHub SSH host key 已存在"
     fi
@@ -371,16 +348,16 @@ setup_github_auth() {
                 warn "gh auth login 失败, 请稍后手动认证"
             }
         else
-            info "跳过 GitHub 认证 (插件安装步骤仍会使用 HTTPS 克隆公开仓库)"
+            info "跳过 GitHub 认证"
         fi
     fi
 
     ok "GitHub 认证配置完成"
 }
 
-# ---- 7. API Key 配置 ----
+# ---- 6. API Key 配置 ----
 setup_api_key() {
-    step "7/10" "API Key 配置 (Claude + Gemini + Codex + GitHub)"
+    step "6/8" "API Key 配置 (Claude + Codex + GitHub)"
 
     if [ ! -f "${ENV_EXAMPLE}" ]; then
         info "创建 .env.example 模板..."
@@ -390,6 +367,21 @@ setup_api_key() {
 #  复制此文件为 .env 并填入你的真实密钥
 #  cp .env.example .env
 # ============================================
+
+# ---- 下载网络设置 (可选，两个脚本在下载前加载 .env) ----
+# 通用 HTTP 代理，按本机代理端口修改
+# HTTPS_PROXY=http://127.0.0.1:7890
+# HTTP_PROXY=http://127.0.0.1:7890
+# DOWNLOAD_ATTEMPTS=3
+# DOWNLOAD_CONNECT_TIMEOUT=15
+# DOWNLOAD_MAX_TIME=600
+# DOWNLOAD_RETRY_DELAY=2
+# DOWNLOAD_IPV4=1
+# 自行指定可访问的源；不自动切换到第三方镜像
+# NPM_REGISTRY=https://registry.npmjs.org
+# NODE_DIST_URL=https://nodejs.org/dist
+# MINICONDA_BASE_URL=https://repo.anaconda.com/miniconda
+# UV_INSTALLER_URL=https://astral.sh/uv/install.sh
 
 # ---- Claude Code (Anthropic 兼容 API) ----
 # 使用第三方 API 代理 (如 DeepSeek)
@@ -406,13 +398,6 @@ CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
 # 生成: https://github.com/settings/tokens → Generate new token (classic)
 # 权限: repo, workflow (根据需要勾选)
 GITHUB_TOKEN=your-github-token-here
-
-# ---- Gemini CLI ----
-# 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
-GEMINI_AUTH_METHOD=login
-# 如果使用 api_key 方式, 取消下面这行的注释并填入 key
-# 获取: https://aistudio.google.com/apikey
-# GEMINI_API_KEY=your-gemini-api-key-here
 
 # ---- Codex CLI (OpenAI) ----
 # 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
@@ -447,16 +432,13 @@ EOF
         echo -e "  方式二: 设置环境变量"
         echo -e "    export ANTHROPIC_AUTH_TOKEN='your-deepseek-key'"
         echo ""
-        echo -e "  ${CYAN}▸ Gemini / Codex 默认使用浏览器 OAuth 登录, 无需 API Key${NC}"
+        echo -e "  ${CYAN}▸ Codex 默认使用浏览器 OAuth 登录, 无需 API Key${NC}"
         echo -e "  如需 API Key 方式, 在 .env 中设置:"
-        echo -e "    GEMINI_AUTH_METHOD=api_key"
-        echo -e "    GEMINI_API_KEY=your-gemini-key"
         echo -e "    CODEX_AUTH_METHOD=api_key"
         echo -e "    OPENAI_API_KEY=your-openai-key"
         echo ""
         echo -e "  获取 API Key:"
         echo -e "    DeepSeek:  ${CYAN}https://platform.deepseek.com/api_keys${NC}"
-        echo -e "    Gemini:    ${CYAN}https://aistudio.google.com/apikey${NC}"
         echo -e "    OpenAI:    ${CYAN}https://platform.openai.com/api-keys${NC}"
         echo -e "    GitHub:    ${CYAN}https://github.com/settings/tokens${NC}"
         echo -e "  ${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -476,7 +458,7 @@ EOF
 
 # ---- 7. 环境变量加载 (从 .env 文件) ----
 load_env_vars() {
-    step "8/10" "加载环境变量"
+    step "7/8" "加载环境变量"
 
     if [ -f "${ENV_FILE}" ]; then
         info "从 ${ENV_FILE} 加载配置..."
@@ -490,15 +472,6 @@ load_env_vars() {
             ok "Claude Code (DeepSeek) 已配置"
         else
             warn "ANTHROPIC_AUTH_TOKEN 未设置或仍是占位符"
-        fi
-
-        # Gemini CLI
-        if [ "${GEMINI_AUTH_METHOD}" = "login" ]; then
-            ok "Gemini CLI 使用浏览器 OAuth 登录"
-        elif [ -n "${GEMINI_API_KEY}" ] && [ "${GEMINI_API_KEY}" != "your-gemini-api-key-here" ]; then
-            ok "Gemini CLI 已配置 (API Key)"
-        else
-            warn "GEMINI_API_KEY 未设置或仍是占位符"
         fi
 
         # Codex CLI
@@ -515,7 +488,7 @@ load_env_vars() {
             ok "GitHub Token 已配置"
             export GH_TOKEN="${GITHUB_TOKEN}"
         else
-            warn "GITHUB_TOKEN 未设置或仍是占位符 (插件安装不受影响, 但 git push 需要)"
+            warn "GITHUB_TOKEN 未设置或仍是占位符 (git push 需要认证)"
         fi
     else
         warn ".env 文件不存在, 跳过环境变量加载"
@@ -523,72 +496,9 @@ load_env_vars() {
     fi
 }
 
-# ---- 8. Claude Code 插件自动安装 ----
-install_plugins() {
-    step "10/10" "Claude Code 插件自动安装"
-
-    CLAUDE_BIN="$(conda run -n "${CONDA_ENV_NAME}" which claude 2>/dev/null || echo '')"
-    if [ -z "${CLAUDE_BIN}" ]; then
-        warn "claude 命令未找到, 跳过插件安装"
-        return
-    fi
-
-    info "添加 marketplaces ..."
-
-    # 添加 marketplaces (幂等操作, 已存在则跳过)
-    # 使用 HTTPS URL 避免 SSH host key 问题
-    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/anthropics/claude-plugins-official 2>&1; then
-        ok "marketplace claude-plugins-official 已就绪"
-    else
-        warn "marketplace claude-plugins-official 添加失败"
-    fi
-
-    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/tanweai/pua 2>&1; then
-        ok "marketplace pua-skills 已就绪"
-    else
-        warn "marketplace pua-skills 添加失败"
-    fi
-
-    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/Yeachan-Heo/oh-my-claudecode.git 2>&1; then
-        ok "marketplace omc 已就绪"
-    else
-        warn "marketplace omc 添加失败"
-    fi
-
-    if conda run -n "${CONDA_ENV_NAME}" claude plugin marketplace add https://github.com/jarrodwatts/claude-hud 2>&1; then
-        ok "marketplace claude-hud 已就绪"
-    else
-        warn "marketplace claude-hud 添加失败"
-    fi
-
-    ok "marketplaces 配置完成"
-
-    info "安装插件 (可能需要几分钟)..."
-
-    PLUGINS=(
-        "code-review@claude-plugins-official"
-        "github@claude-plugins-official"
-        "skill-creator@claude-plugins-official"
-        "pua@pua-skills"
-        "oh-my-claudecode@omc"
-        "claude-hud@claude-hud"
-    )
-
-    for plugin in "${PLUGINS[@]}"; do
-        info "安装 ${plugin} ..."
-        if conda run -n "${CONDA_ENV_NAME}" claude plugin install "${plugin}" 2>&1; then
-            ok "${plugin} 安装成功"
-        else
-            warn "${plugin} 安装失败 (可稍后手动: claude plugin install ${plugin})"
-        fi
-    done
-
-    ok "插件安装流程完成"
-}
-
-# ---- 9. Claude Code 配置恢复 ----
+# ---- 8. Claude Code 配置恢复 ----
 restore_config() {
-    step "9/10" "Claude Code 配置恢复"
+    step "8/8" "Claude Code 配置恢复"
 
     # 创建目录
     if [ ! -d "${CLAUDE_DIR}" ]; then
@@ -609,8 +519,6 @@ restore_config() {
         ok "keybindings.json 已恢复"
     fi
 
-    # 注意: 插件 marketplace 和 installed_plugins 元数据由步骤 9 (install_plugins) 自动生成,
-    # 不从此处覆盖，避免硬编码路径污染
 }
 
 # ---- 完成提示 ----
@@ -625,7 +533,6 @@ print_summary() {
     echo -e "    conda 环境:    ${CONDA_INSTALL_DIR}"
     echo -e "    激活命令:      ${GREEN}conda activate ${CONDA_ENV_NAME}${NC}"
     echo -e "    Claude Code:   ${GREEN}claude${NC}"
-    echo -e "    Gemini CLI:    ${GREEN}gemini${NC}"
     echo -e "    Codex CLI:     ${GREEN}codex${NC}"
     echo -e "    配置目录:      ${CLAUDE_DIR}"
     echo ""
@@ -643,22 +550,8 @@ print_summary() {
     echo -e "    ${GREEN}# Claude Code${NC}"
     echo -e "    claude"
     echo ""
-    echo -e "    ${GREEN}# Gemini CLI${NC}"
-    echo -e "    gemini"
-    echo ""
     echo -e "    ${GREEN}# Codex CLI${NC}"
     echo -e "    codex"
-    echo ""
-
-    echo -e "  ${CYAN}各 CLI 扩展/插件安装状态:${NC}"
-    echo ""
-    echo -e "    ${GREEN}Claude Code (6 插件):${NC} code-review, github, skill-creator, pua, oh-my-claudecode, claude-hud"
-    echo -e "    ${GREEN}Gemini CLI:${NC} 未自动安装扩展"
-    echo -e "    ${YELLOW}Codex CLI:${NC} 未自动安装插件"
-    echo ""
-
-    echo -e "  ${CYAN}重新加载 Claude Code 插件 (如需要):${NC}"
-    echo -e "    进入 Claude Code 后执行 /plugin reload"
     echo ""
 
     echo -e "  ${CYAN}▸ 环境变量已配置:${NC}"
@@ -679,17 +572,20 @@ print_summary() {
 # ============================================================
 main() {
     banner
+    if [ -f "${ENV_FILE}" ]; then
+        set -a
+        source "${ENV_FILE}"
+        set +a
+    fi
 
     check_system
     install_conda
     install_claude_code
-    install_gemini_cli
     install_codex_cli
     setup_github_auth
     setup_api_key
     load_env_vars
     restore_config
-    install_plugins
     print_summary
 }
 
