@@ -22,3 +22,6 @@ Thumbs.db
 
 # Python test cache
 __pycache__/
+
+# 本地插件会话缓存，不纳入部署配置
+.omc/

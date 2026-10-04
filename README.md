@@ -1,73 +1,109 @@
-# haozhengwan's AI CLI 工具一键部署
+# AI 编程工具部署与配置
 
-一键部署 Claude Code + Codex CLI 开发环境 + 配置恢复。
+部署 Claude Code、Codex CLI 和 Antigravity CLI，并恢复 Claude Code 基础配置。默认使用 curl 下载官方原生安装器，**不需要 Anaconda、conda、uv、Python 或 Node.js 环境**。
 
-## 快速开始 (新机器)
+本仓库使用 Antigravity CLI（`agy`），不再安装 Gemini CLI。不安装插件、编辑器扩展或 marketplace；`CLAUDE.md` 和 `GEMINI.md` 保持不存在。
 
-提供两种环境管理方案，**功能等价，按需选用**:
+## 快速开始
 
-| 方案 | 脚本 | 环境管理 | 体积 | 适用场景 |
-|------|------|----------|------|----------|
-| **conda 版** | `restore.sh` | Anaconda/Miniconda | ~500MB+ | 通用 Linux/macOS, 需要独立 Python + Node.js 环境 |
-| **uv 版** | `restore_uv.sh` | uv + venv | ~20MB + Node.js | NVIDIA 容器, 已有系统 Python, 追求轻量且隔离 CLI |
-
-### conda 版 (兼容性最广)
+在 Linux/macOS 的 x64 或 ARM64 机器上，准备好 Bash、curl、tar，以及用于克隆仓库的 git：
 
 ```bash
-git clone https://github.com/haozhengwan/claude_code_settings.git
-cd claude_code_settings
+git clone https://github.com/haozhengwan/Coding_agent_settings.git
+cd Coding_agent_settings
 bash restore.sh
-# 启动: conda activate claude
+
+# 让当前终端找到原生 CLI；建议同时加入 ~/.bashrc 或 ~/.zshrc
+export PATH="$HOME/.local/bin:$PATH"
+claude
+codex
+agy
 ```
 
-### uv 版 (轻量快速)
+默认流程：检查系统 → 安装 Claude Code → 安装 Codex CLI → 安装 Antigravity CLI → 恢复配置。已有命令会复用并检查版本；如果它来自已激活的 conda/venv，后续仍需激活对应环境。
+
+脚本先完整下载安装器，下载成功后再执行。任何下载、安装或版本检查失败都会停止。原生模式覆盖 `~/.claude/settings.json` 和 `keybindings.json` 前，会将已有文件备份到该目录下的 `restore-backup.*`。可通过 `CLAUDE_CONFIG_DIR` 指定配置目录。
+
+首次启动各 CLI 时按提示登录。原生模式不自动安装 gh 或修改 GitHub 认证；如有需要，自行安装 gh 后执行 `gh auth login`。
+
+### 仅手动安装 CLI
+
+以下命令来自 [Claude Code 官方文档](https://code.claude.com/docs/en/setup)、[Codex CLI 官方文档](https://learn.chatgpt.com/docs/codex/cli) 和 [Antigravity 官方文档](https://www.antigravity.google/docs/cli/install/)：
 
 ```bash
-git clone https://github.com/haozhengwan/claude_code_settings.git
-cd claude_code_settings
-bash restore_uv.sh
-# 激活 venv 后使用 CLI:
+export CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1
+curl -fsSL https://claude.ai/install.sh | bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --skip-aliases --skip-path
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+手动命令只安装 CLI，恢复本仓库配置的方法见下文。Antigravity 的 `--skip-aliases --skip-path` 保留现有 shell 别名及配置文件，PATH 由上面的命令设置。桌面版如有需要，可从 [Antigravity 下载页](https://antigravity.google/download) 单独安装。
+
+## 可选的环境管理方式
+
+| 方式 | 命令 | Claude Code / Codex 安装方式 | Antigravity 安装方式 |
+|------|------|----------------------------|---------------------|
+| 原生（默认） | `bash restore.sh` 或 `bash restore.sh --native` | 官方原生安装器 | 官方原生安装器，`~/.local/bin/agy` |
+| conda（可选） | `bash restore.sh --conda` | conda 环境内 npm | 同上 |
+| uv（可选，Linux） | `bash restore.sh --uv` | uv venv 内 Node.js + npm | 同上 |
+
+也可直接执行 `bash restore_conda.sh` 或 `bash restore_uv.sh`。这两个方案保留原有的 GitHub 认证、API Key 交互配置和配置恢复流程；Claude 配置文件会直接覆盖，请按需先备份。仅在需要这些环境时选用。
+
+```bash
+# conda 版启动
+conda activate claude
+claude
+codex
+
+# uv 版启动
 source ~/.venv/claude/bin/activate
+claude
+codex
+
+# Antigravity 使用原生安装位置，三种方案相同
+export PATH="$HOME/.local/bin:$PATH"
+agy
 ```
 
-### 部署流程 (两个版本)
+### 环境变量
 
-脚本会按顺序完成:
-1. **系统检查** — 安装 curl/wget/git 等基础工具
-2. **环境安装** — conda (conda 版) 或 uv + venv + Node.js (uv 版, Node.js 位于 venv 内)
-3. **Claude Code CLI** — 在所选环境中安装 `@anthropic-ai/claude-code`
-4. **Codex CLI** — 在所选环境中安装 `@openai/codex`
-5. **GitHub 认证** — git + gh CLI + SSH 配置
-6. **API Key 配置** — 交互式创建 `.env` 文件 (支持 Claude/Codex 两种 key)
-7. **环境变量加载** — 从 `.env` 加载并验证配置
-8. **配置恢复** — settings.json + keybindings.json
-
-## 目录结构
-
-```
-├── config/                    # 配置文件
-│   ├── settings.json          # 全局设置 (主题)
-│   └── keybindings.json       # 键盘快捷键
-├── lib/network.sh            # 共享下载与 npm 重试函数
-├── tests/test_network.py     # 离线网络故障回归检查
-├── .env.example               # API Key 模板 (可安全提交)
-├── .env                       # 你的真实 API Key (gitignore 已排除)
-├── restore.sh                 # conda 版一键部署脚本
-├── restore_uv.sh              # uv 版一键部署脚本 (轻量, 推荐容器使用)
-├── MANIFEST.md                # 完整文件清单
-├── .gitignore
-└── README.md                  # 本文件
-```
-
-## 下载失败与代理配置
-
-两个脚本在下载前读取 `.env`，网络设置也可作为环境变量传入。文件下载默认最多尝试 3 次，连接超时 15 秒，每次传输最长 600 秒。失败的临时文件会清理，只有完整且非空的下载才替换目标文件。npm 使用自身的重试机制并显示错误输出。
-
-如本机已有 HTTP 代理，可设置实际端口后运行：
+所有脚本都会在下载前加载仓库根目录的 `.env`。下列变量也可直接在命令前传入；同名设置以 `.env` 中的值为准。运行脚本仅在其子进程中加载变量，日常使用前仍需在当前终端加载 `.env`。
 
 ```bash
-HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 bash restore_uv.sh
-# conda 版同样支持
+# 可选：使用已有的 Anthropic 兼容 API 配置
+cp .env.example .env
+vim .env
+set -a; source .env; set +a
+```
+
+`.env.example` 保留现有的 DeepSeek 模型配置。按实际服务填写 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 和模型名称，再加载 `.env`；不要直接使用占位密钥。使用 CLI 的账号登录时不必复制模板。
+
+Codex 默认按首次启动提示登录。如使用 API Key，在 `.env` 设置 `CODEX_AUTH_METHOD=api_key` 和 `OPENAI_API_KEY`，加载后按 [Codex 认证文档](https://learn.chatgpt.com/docs/auth) 完成登录。`CODEX_AUTH_METHOD` 只是本仓库的提示选项，脚本不会代为登录。
+
+Antigravity 首次执行 `agy` 后按提示登录；SSH 场景按终端显示的授权链接和验证码完成登录，见 [官方认证说明](https://www.antigravity.google/docs/cli/install/)。
+
+| 变量 | 默认值 | 适用范围 |
+|------|--------|----------|
+| `CLAUDE_INSTALLER_URL` | `https://claude.ai/install.sh` | 原生模式 |
+| `CODEX_INSTALLER_URL` | `https://chatgpt.com/codex/install.sh` | 原生模式 |
+| `ANTIGRAVITY_INSTALLER_URL` | `https://antigravity.google/cli/install.sh` | 所有模式 |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | 原生模式配置恢复位置 |
+| `CONDA_INSTALL_DIR` | `~/anaconda3` | conda 安装位置 |
+| `CONDA_ENV_NAME` | `claude` | conda 环境名称 |
+| `VENV_DIR` | `~/.venv/claude` | uv 虚拟环境 |
+| `NODE_INSTALL_PREFIX` | `VENV_DIR` | uv 版 Node.js / npm CLI 位置 |
+| `NODE_VERSION` | `20` | conda / uv 版 Node.js 版本 |
+| `PYTHON_VERSION` | `3.12` | conda / uv 版 Python 版本 |
+
+```bash
+CONDA_ENV_NAME=myenv NODE_VERSION=22 bash restore.sh --conda
+VENV_DIR=~/.venv/claude-ai NODE_VERSION=22 bash restore.sh --uv
+```
+
+## 下载失败与代理
+
+```bash
 HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 bash restore.sh
 ```
 
@@ -78,200 +114,55 @@ HTTPS_PROXY=http://127.0.0.1:7890 HTTP_PROXY=http://127.0.0.1:7890 bash restore.
 | `DOWNLOAD_MAX_TIME` | `600` | 每次传输超时（秒） |
 | `DOWNLOAD_RETRY_DELAY` | `2` | 文件下载重试间隔（秒） |
 | `DOWNLOAD_IPV4` | `0` | 设为 `1` 强制文件下载使用 IPv4 |
-| `NPM_REGISTRY` | npm 当前配置 | Claude Code / Codex npm 包下载源 |
-| `NODE_DIST_URL` | `https://nodejs.org/dist` | uv 版 Node.js 下载根目录，需包含版本目录及校验清单 |
+| `NPM_REGISTRY` | npm 当前配置 | conda / uv 版 npm 包下载源 |
+| `NODE_DIST_URL` | `https://nodejs.org/dist` | uv 版 Node.js 下载根目录 |
 | `MINICONDA_BASE_URL` | `https://repo.anaconda.com/miniconda` | conda 安装器下载根目录 |
 | `UV_INSTALLER_URL` | `https://astral.sh/uv/install.sh` | uv 安装脚本地址 |
+| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | 空 | uv 版 gh Release 下载代理前缀 |
 
-下载源可改为你能访问的镜像；脚本不自动选择第三方镜像。`GITHUB_PROXY_URL` 仅用于 uv 版 gh Release 文件，失败后尝试官方地址，不代理 npm、Node.js 或 uv 安装器内部的下载。uv/Python 和 conda 包下载仍由各自工具处理，可使用通用 HTTP 代理及各自的源配置。文件重试参数不控制这些包管理器。
+文件下载只有完整且非空时才替换目标，失败会清理临时文件。npm 使用自身的重试机制。uv 版 Node.js 从下载源的完整清单选取版本并校验 SHA-256，失败即停止。
 
-uv 版 Node.js 从下载源的完整清单选取版本并校验 SHA-256；查询、下载或校验失败时停止，不再使用旧的硬编码版本。校验用于检测文件损坏，镜像源本身应可信。
+`DOWNLOAD_*` 只控制本仓库直接下载的文件，不控制官方安装器内部下载及包管理器；这些步骤可使用通用 HTTP 代理和各工具自己的源配置。GitHub 下载代理仅用于 uv 版 gh Release，失败后尝试官方地址。自定义安装器地址会下载并执行代码，应指向可信来源；脚本不自动选择第三方镜像。
 
-网络参数依据 [curl 文档](https://curl.se/docs/manpage.html) 和 [npm 配置文档](https://docs.npmjs.com/cli/v11/using-npm/config/)。
+## 配置与仓库范围
 
-运行离线回归检查：
+`config/settings.json` 设置深色主题，并通过 `CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL=1` 关闭 Claude Code 官方插件市场的自动注册，含义见 [官方环境变量文档](https://code.claude.com/docs/en/env-vars)。仓库不包含插件安装、marketplace 恢复或 Gemini CLI 部署步骤；本地已有插件不在本次清理范围内。
+
+本仓库不创建或恢复 `CLAUDE.md`、`GEMINI.md`。本地 `.omc/` 会话缓存已加入 gitignore，不参与部署。
+
+仅恢复配置时，先按需备份原文件，再执行：
 
 ```bash
+mkdir -p ~/.claude
+cp config/settings.json config/keybindings.json ~/.claude/
+```
+
+## 目录结构
+
+```text
+├── restore.sh                # 默认原生安装；--conda / --uv 可选入口
+├── restore_conda.sh          # 可选 conda 方案
+├── restore_uv.sh             # 可选 uv + venv 方案
+├── lib/
+│   ├── network.sh            # 下载、代理与 npm 重试
+│   └── installers.sh         # 官方安装器执行与 Antigravity 安装
+├── config/
+│   ├── settings.json         # Claude Code 主题与禁止自动注册插件市场
+│   └── keybindings.json      # Claude Code 快捷键
+├── tests/                    # 离线回归检查
+├── .env.example              # 环境变量模板，真实 .env 已忽略
+├── .gitignore
+├── MANIFEST.md
+└── README.md
+```
+
+## 验证
+
+以下检查不会下载或安装软件：
+
+```bash
+for script in restore.sh restore_conda.sh restore_uv.sh lib/network.sh lib/installers.sh; do
+  bash -n "$script" || break
+done
 python3 -m unittest discover -s tests -v
 ```
-
-## 自定义变量
-
-### uv 版专属变量 (`restore_uv.sh`)
-
-```bash
-# 自定义 venv 目录
-VENV_DIR=~/.venv/claude-ai bash restore_uv.sh
-
-# 自定义 Node.js / Python 版本
-NODE_VERSION=22 PYTHON_VERSION=3.13 bash restore_uv.sh
-
-# 自定义 Node.js / CLI 安装路径 (默认跟随 VENV_DIR, 通常无需设置)
-NODE_INSTALL_PREFIX=~/.venv/claude bash restore_uv.sh
-
-# GitHub 下载/克隆较慢时启用代理
-GITHUB_PROXY_URL=https://ghproxy.net bash restore_uv.sh
-# 或: GH_PROXY_URL=https://ghproxy.com bash restore_uv.sh
-```
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `VENV_DIR` | `~/.venv/claude` | Python 虚拟环境路径 |
-| `NODE_VERSION` | `20` | Node.js 版本 (20 LTS) |
-| `PYTHON_VERSION` | `3.12` | Python 版本 (uv 可自动下载) |
-| `NODE_INSTALL_PREFIX` | `VENV_DIR` | Node.js 和 npm 全局 CLI 安装路径, 默认在 uv venv 内 |
-| `GITHUB_PROXY_URL` / `GH_PROXY_URL` | (空) | GitHub 代理前缀, 如 `https://ghproxy.net`, 用于 uv 版 gh Release 下载 |
-
-### conda 版专属变量 (`restore.sh`)
-
-```bash
-# 自定义 conda 安装路径
-CONDA_INSTALL_DIR=/opt/anaconda3 bash restore.sh
-
-# 自定义 conda 环境名 / Node 版本 / Python 版本
-CONDA_ENV_NAME=myenv NODE_VERSION=22 PYTHON_VERSION=3.13 bash restore.sh
-```
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CONDA_INSTALL_DIR` | `~/anaconda3` | conda 安装路径 |
-| `CONDA_ENV_NAME` | `claude` | conda 环境名 |
-| `NODE_VERSION` | `20` | Node.js 版本 |
-| `PYTHON_VERSION` | `3.12` | Python 版本 |
-
-### Claude Code 配置
-
-```bash
-# 使用自己的 DeepSeek API key
-ANTHROPIC_AUTH_TOKEN=sk-your-deepseek-key bash restore.sh
-
-# 或者使用其他 Anthropic 兼容 API
-ANTHROPIC_BASE_URL=https://your-proxy.com/anthropic \
-ANTHROPIC_AUTH_TOKEN=your-key \
-ANTHROPIC_MODEL=your-model \
-bash restore.sh
-```
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `ANTHROPIC_BASE_URL` | `https://api.deepseek.com/anthropic` | Anthropic 兼容 API 地址 |
-| `ANTHROPIC_AUTH_TOKEN` | (空) | API 认证 Token |
-| `ANTHROPIC_MODEL` | `deepseek-v4-pro[1m]` | 默认模型 |
-| `ANTHROPIC_DEFAULT_OPUS_MODEL` | `deepseek-v4-pro[1m]` | Opus 级别模型 |
-| `ANTHROPIC_DEFAULT_SONNET_MODEL` | `deepseek-v4-pro[1m]` | Sonnet 级别模型 |
-| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | `deepseek-v4-flash` | Haiku 级别模型 |
-| `CLAUDE_CODE_SUBAGENT_MODEL` | `deepseek-v4-flash` | Subagent 使用的模型 |
-
-### Codex CLI 配置
-
-**默认使用浏览器 OAuth 登录，无需 API Key。** 首次运行 `codex` 时会自动打开浏览器完成认证。
-
-如需使用 API Key 方式：
-
-```bash
-CODEX_AUTH_METHOD=api_key OPENAI_API_KEY=your-key bash restore.sh
-```
-
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `CODEX_AUTH_METHOD` | `login` | 认证方式: `login` (浏览器OAuth) 或 `api_key` |
-| `OPENAI_API_KEY` | (空) | OpenAI API Key ([获取](https://platform.openai.com/api-keys)) |
-
-### 一键设置所有 Key
-
-```bash
-ANTHROPIC_AUTH_TOKEN=sk-deepseek-xxx \
-bash restore.sh
-```
-
-## .env.example 模板
-
-运行脚本后会自动生成 `.env.example`，内容如下：
-
-```bash
-# ---- Claude Code (Anthropic 兼容 API) ----
-ANTHROPIC_BASE_URL=https://api.deepseek.com/anthropic
-ANTHROPIC_AUTH_TOKEN=your-deepseek-api-key-here
-ANTHROPIC_MODEL=deepseek-v4-pro[1m]
-ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek-v4-pro[1m]
-ANTHROPIC_DEFAULT_SONNET_MODEL=deepseek-v4-pro[1m]
-ANTHROPIC_DEFAULT_HAIKU_MODEL=deepseek-v4-flash
-CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
-
-# ---- GitHub 认证 ----
-GITHUB_TOKEN=your-github-token-here
-
-# ---- GitHub 下载代理 (可选, uv 版) ----
-# GITHUB_PROXY_URL=https://ghproxy.net
-
-# ---- Codex CLI (默认浏览器 OAuth 登录, 无需 API Key) ----
-CODEX_AUTH_METHOD=login
-# OPENAI_API_KEY=your-openai-api-key-here
-```
-
-复制并填入真实 key：
-
-```bash
-cp .env.example .env
-vim .env
-```
-
-## 安装范围
-
-仅安装 Claude Code 和 Codex CLI，不安装插件、扩展或 marketplace。
-
-## 手动恢复 (仅配置文件)
-
-如果已有 Claude Code 环境 (conda 或 uv 版均可)，只想恢复配置:
-
-```bash
-# 手动复制
-cp config/settings.json ~/.claude/
-cp config/keybindings.json ~/.claude/
-```
-
-## 启动
-
-### conda 版
-
-```bash
-conda activate claude
-claude     # Claude Code
-codex      # Codex CLI
-```
-
-### uv 版
-
-CLI 工具安装在 uv venv 的 `bin/` 目录内，激活 venv 后使用:
-
-```bash
-source ~/.venv/claude/bin/activate  # 或自定义的 VENV_DIR
-claude     # Claude Code
-codex      # Codex CLI
-```
-
-## 快速环境变量导入
-
-如果 `.env` 已配置好，每次使用前快速加载：
-
-```bash
-# conda 版
-set -a; source .env; set +a
-conda activate claude
-
-# uv 版
-set -a; source .env; set +a
-source ~/.venv/claude/bin/activate
-```
-
-## 环境要求 (脚本会自动安装)
-
-### conda 版
-- Linux (x86_64/aarch64) 或 macOS
-- 网络连接
-- 脚本会自动安装: curl, wget, git, Miniconda, Node.js, Claude Code CLI, Codex CLI
-
-### uv 版
-- Linux (x86_64/aarch64)
-- 网络连接
-- 脚本会自动安装: curl, wget, git, xz-utils, uv, Python venv, venv 内 Node.js, venv 内 Claude Code CLI, Codex CLI

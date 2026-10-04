@@ -1,20 +1,15 @@
 #!/bin/bash
 # ============================================================
-#  AI CLI 工具一键部署脚本 (uv 版 · 9 步)
-#  涵盖: uv → venv → Node.js → Claude Code / Codex CLI / Antigravity CLI → GitHub 认证 → API Key → 配置恢复
-#
-#  适用场景: NVIDIA 官方容器 / 已有系统 Python 的环境
-#  与 restore_conda.sh 功能等价, 但使用 uv (20MB) 替代 Anaconda (500MB+)
-#  conda / uv 为可选方案；无需环境管理时使用 restore.sh 原生安装
+#  AI CLI 工具一键部署脚本 (conda 版 · 9 步)
+#  涵盖: Anaconda → Node.js → Claude Code / Codex CLI / Antigravity CLI → GitHub 认证 → API Key → 配置恢复
 # ============================================================
 set -eo pipefail
 
 # ---- 可配置变量 ----
-VENV_DIR="${VENV_DIR:-${HOME}/.venv/claude}"
+CONDA_INSTALL_DIR="${CONDA_INSTALL_DIR:-${HOME}/anaconda3}"
+CONDA_ENV_NAME="${CONDA_ENV_NAME:-claude}"
 NODE_VERSION="${NODE_VERSION:-20}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
-NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX:-}"
-GITHUB_PROXY_URL="${GITHUB_PROXY_URL:-${GH_PROXY_URL:-}}"
 
 # ---- Claude Code 配置 (可修改) ----
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-https://api.deepseek.com/anthropic}"
@@ -53,50 +48,13 @@ warn()  { echo -e "  ${YELLOW}⚠${NC} ${1}"; }
 fail()  { echo -e "  ${RED}✗${NC} ${1}"; }
 info()  { echo -e "  ${CYAN}→${NC} ${1}"; }
 
-refresh_github_proxy_url() {
-    if [ -z "${GITHUB_PROXY_URL:-}" ] && [ -n "${GH_PROXY_URL:-}" ]; then
-        GITHUB_PROXY_URL="${GH_PROXY_URL}"
-    fi
-    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-        GITHUB_PROXY_URL="${GITHUB_PROXY_URL%/}"
-    fi
-}
-
-configure_venv_toolchain() {
-    if [ -z "${NODE_INSTALL_PREFIX:-}" ]; then
-        NODE_INSTALL_PREFIX="${VENV_DIR}"
-    fi
-    NODE_INSTALL_PREFIX="${NODE_INSTALL_PREFIX%/}"
-    mkdir -p "${NODE_INSTALL_PREFIX}/bin" "${NODE_INSTALL_PREFIX}/lib"
-    export PATH="${NODE_INSTALL_PREFIX}/bin:${PATH}"
-    export NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}"
-}
-
-npm_install_global() {
-    local PACKAGE="$1"
-    NPM_CONFIG_PREFIX="${NODE_INSTALL_PREFIX}" npm_install_with_retry "${PACKAGE}" "${NODE_INSTALL_PREFIX}/bin/npm"
-}
-
 banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}   AI CLI 工具一键部署 (uv 版)          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}   AI CLI 工具一键部署                   ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}   Claude Code + Codex + Antigravity     ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
     echo ""
-}
-
-preload_env_vars() {
-    if [ -f "${ENV_FILE}" ]; then
-        info "预加载 ${ENV_FILE} ..."
-        set -a
-        source "${ENV_FILE}"
-        set +a
-        refresh_github_proxy_url
-        ok ".env 已预加载"
-    else
-        refresh_github_proxy_url
-    fi
 }
 
 # ---- 1. 系统环境检查 ----
@@ -106,10 +64,6 @@ check_system() {
     OS="$(uname -s)"
     ARCH="$(uname -m)"
     info "操作系统: ${OS} (${ARCH})"
-    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-        ok "GitHub 下载代理: ${GITHUB_PROXY_URL}"
-        info "将用于 gh Release 下载"
-    fi
 
     # 检查基础工具
     for cmd in curl wget tar; do
@@ -129,20 +83,12 @@ check_system() {
         fi
     done
 
-    # 检查系统 Python (uv 需要)
-    if command -v python3 &>/dev/null; then
-        ok "python3: $(python3 --version 2>/dev/null)"
-    elif command -v python &>/dev/null; then
-        ok "python: $(python --version 2>/dev/null)"
-    else
-        warn "系统 Python 未找到, uv 将自动下载 Python ${PYTHON_VERSION}"
-    fi
-
     # 检查 git (系统级, VS Code 等 IDE 需要)
+    # 注意: 即使 conda 环境有 git, 系统级 git 也必须存在供 IDE 使用
     if [ -x "/usr/bin/git" ]; then
         ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
     elif command -v git &>/dev/null; then
-        warn "git 仅在非标准路径, 安装系统级 git (VS Code 需要)..."
+        warn "git 仅在 conda 环境可用, 安装系统级 git (VS Code 需要)..."
         if command -v apt-get &>/dev/null; then
             apt-get update -qq && apt-get install -y -qq git
             ok "git 系统级: $(/usr/bin/git --version 2>/dev/null | awk '{print $NF}')"
@@ -166,208 +112,102 @@ check_system() {
         fi
         ok "git $(git --version 2>/dev/null | awk '{print $NF}')"
     fi
-
-    # 检测是否需要 xz 解压工具 (Node.js tarball)
-    if ! command -v xz &>/dev/null; then
-        warn "xz 未安装, 尝试安装..."
-        if command -v apt-get &>/dev/null; then
-            apt-get update -qq && apt-get install -y -qq xz-utils
-        elif command -v yum &>/dev/null; then
-            yum install -y -q xz
-        elif command -v dnf &>/dev/null; then
-            dnf install -y -q xz
-        fi
-    fi
 }
 
-# ---- 2a. uv 安装 ----
-install_uv() {
-    step "2/9" "uv + venv + Node.js 环境"
+# ---- 2. Anaconda/Miniconda 安装 ----
+install_conda() {
+    step "2/9" "Anaconda/Miniconda 环境"
 
-    info "--- uv Python 包管理器 ---"
-
-    if command -v uv &>/dev/null; then
-        ok "uv 已安装: $(uv --version 2>/dev/null)"
-        UV_EXISTING="yes"
-    elif [ -f "${HOME}/.local/bin/uv" ]; then
-        ok "uv 已存在于 ~/.local/bin"
-        export PATH="${HOME}/.local/bin:${PATH}"
-        UV_EXISTING="yes"
-    elif [ -f "${HOME}/.cargo/bin/uv" ]; then
-        ok "uv 已存在于 ~/.cargo/bin"
-        export PATH="${HOME}/.cargo/bin:${PATH}"
-        UV_EXISTING="yes"
+    # 如果 conda 已存在
+    if command -v conda &>/dev/null; then
+        ok "conda 已安装: $(conda --version 2>/dev/null)"
+        CONDA_EXISTING="yes"
+    elif [ -f "${CONDA_INSTALL_DIR}/bin/conda" ]; then
+        ok "conda 已存在于 ${CONDA_INSTALL_DIR}"
+        CONDA_EXISTING="yes"
+        # 初始化 shell
+        eval "$(${CONDA_INSTALL_DIR}/bin/conda shell.bash hook)" 2>/dev/null || true
     else
-        UV_EXISTING="no"
+        CONDA_EXISTING="no"
     fi
 
-    if [ "${UV_EXISTING}" = "no" ]; then
-        info "安装 uv (Astral 官方脚本)..."
-        local UV_INSTALLER
-        UV_INSTALLER="$(mktemp)"
-        if ! download_file "${UV_INSTALLER_URL:-https://astral.sh/uv/install.sh}" "${UV_INSTALLER}"; then
-            rm -f "${UV_INSTALLER}"
-            return 1
-        fi
-        if ! sh "${UV_INSTALLER}"; then
-            rm -f "${UV_INSTALLER}"
-            return 1
-        fi
-        rm -f "${UV_INSTALLER}"
-        export PATH="${HOME}/.local/bin:${PATH}"
-        ok "uv 安装完成: $(uv --version 2>/dev/null)"
+    if [ "${CONDA_EXISTING}" = "no" ]; then
+        warn "conda 未安装, 开始下载 Miniconda..."
+
+        case "${OS}" in
+            Linux)
+                CONDA_URL="${MINICONDA_BASE_URL:-https://repo.anaconda.com/miniconda}/Miniconda3-latest-Linux-${ARCH}.sh"
+                ;;
+            Darwin)
+                CONDA_URL="${MINICONDA_BASE_URL:-https://repo.anaconda.com/miniconda}/Miniconda3-latest-MacOSX-${ARCH}.sh"
+                ;;
+            *)
+                fail "不支持的操作系统: ${OS}"
+                exit 1
+                ;;
+        esac
+
+        CONDA_INSTALLER="/tmp/miniconda_installer.sh"
+        info "下载 ${CONDA_URL}"
+        download_file "${CONDA_URL}" "${CONDA_INSTALLER}" || {
+            fail "下载失败, 请检查网络或手动安装 Anaconda: https://www.anaconda.com/download"
+            exit 1
+        }
+
+        info "安装到 ${CONDA_INSTALL_DIR} (静默模式)"
+        bash "${CONDA_INSTALLER}" -b -p "${CONDA_INSTALL_DIR}" > /dev/null 2>&1
+        rm -f "${CONDA_INSTALLER}"
+
+        # 初始化
+        eval "$(${CONDA_INSTALL_DIR}/bin/conda shell.bash hook)" 2>/dev/null || true
+        ok "Miniconda 安装完成: $(${CONDA_INSTALL_DIR}/bin/conda --version)"
     fi
 
-    # 确保 uv 在 PATH 中
-    if ! command -v uv &>/dev/null; then
-        export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:${PATH}"
-    fi
-}
+    # 配置 conda 基础设置
+    info "配置 conda..."
+    conda config --set auto_activate_base false 2>/dev/null || true
+    conda config --set channel_priority flexible 2>/dev/null || true
 
-# ---- 2b. venv 创建 ----
-setup_venv() {
-    info "--- Python 虚拟环境 ---"
-
-    # 检测系统是否有合适的 Python
-    local PYTHON_CMD=""
-    if command -v python3 &>/dev/null; then
-        PYTHON_CMD="python3"
-    elif command -v python &>/dev/null; then
-        PYTHON_CMD="python"
-    fi
-
-    # 检查 Python 版本是否满足要求
-    local PY_OK=false
-    if [ -n "${PYTHON_CMD}" ]; then
-        local PY_VER
-        PY_VER=$("${PYTHON_CMD}" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0")
-        local REQ_MAJOR="${PYTHON_VERSION%%.*}"
-        local REQ_MINOR="${PYTHON_VERSION#*.}"
-        local SYS_MAJOR="${PY_VER%%.*}"
-        local SYS_MINOR="${PY_VER#*.}"
-        if [ "${SYS_MAJOR}" -ge "${REQ_MAJOR}" ] && [ "${SYS_MINOR}" -ge "${REQ_MINOR}" ]; then
-            PY_OK=true
-            ok "系统 Python ${PY_VER} 满足要求 (>= ${PYTHON_VERSION})"
-        else
-            warn "系统 Python ${PY_VER} 不满足要求 (>= ${PYTHON_VERSION}), uv 将自动下载"
-        fi
-    fi
-
-    if [ -d "${VENV_DIR}" ] && [ -f "${VENV_DIR}/bin/python" ]; then
-        ok "venv 已存在: ${VENV_DIR}"
-        # 验证 Python 版本
-        local VENV_PY_VER
-        VENV_PY_VER=$("${VENV_DIR}/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0")
-        ok "  venv Python: ${VENV_PY_VER}"
+    # 创建或检查专用环境
+    if conda env list 2>/dev/null | grep -q "^${CONDA_ENV_NAME} "; then
+        ok "conda 环境 '${CONDA_ENV_NAME}' 已存在"
     else
-        info "创建 venv: ${VENV_DIR} (Python ${PYTHON_VERSION})..."
-        if [ "${PY_OK}" = true ]; then
-            # 使用系统 Python
-            uv venv "${VENV_DIR}" --python "${PYTHON_CMD}"
-        else
-            # uv 自动下载指定版本的 Python
-            uv venv "${VENV_DIR}" --python "${PYTHON_VERSION}"
-        fi
-        ok "venv 创建完成"
+        info "创建 conda 环境 '${CONDA_ENV_NAME}' (Python ${PYTHON_VERSION})..."
+        conda create -n "${CONDA_ENV_NAME}" python="${PYTHON_VERSION}" -y
+        ok "conda 环境 '${CONDA_ENV_NAME}' 创建完成"
     fi
 
-    # 升级 pip (在 venv 内)
-    if [ -f "${VENV_DIR}/bin/pip" ]; then
-        "${VENV_DIR}/bin/pip" install --upgrade pip -q 2>/dev/null || true
-    fi
-}
+    # 安装 Node.js
+    info "在 '${CONDA_ENV_NAME}' 环境中安装 Node.js ${NODE_VERSION}..."
+    conda install -n "${CONDA_ENV_NAME}" "nodejs=${NODE_VERSION}" -c conda-forge -y
+    ok "Node.js $($(conda run -n "${CONDA_ENV_NAME}" which node) --version 2>/dev/null)"
+    ok "npm $($(conda run -n "${CONDA_ENV_NAME}" which npm) --version 2>/dev/null)"
 
-# ---- 2c. Node.js 安装 ----
-install_nodejs() {
-    info "--- Node.js 运行时 ---"
-    configure_venv_toolchain
+    # 安装 git (版本控制工具)
+    info "在 '${CONDA_ENV_NAME}' 环境中安装 git..."
+    conda install -n "${CONDA_ENV_NAME}" git -c conda-forge -y
+    ok "git $(conda run -n "${CONDA_ENV_NAME}" git --version 2>/dev/null)"
 
-    # uv 版将 Node.js 放入 venv, 不复用系统 Node.js
-    local NODE_BIN="${NODE_INSTALL_PREFIX}/bin/node"
-    local NPM_BIN="${NODE_INSTALL_PREFIX}/bin/npm"
-    if [ -x "${NODE_BIN}" ]; then
-        local NODE_VER
-        NODE_VER=$("${NODE_BIN}" --version 2>/dev/null | sed 's/^v//')
-        local NODE_MAJOR="${NODE_VER%%.*}"
-        if [ "${NODE_MAJOR}" -ge "${NODE_VERSION}" ]; then
-            ok "venv Node.js ${NODE_VER} 已满足要求 (>= ${NODE_VERSION})"
-            ok "npm $("${NPM_BIN}" --version 2>/dev/null)"
-            return
-        else
-            warn "venv Node.js ${NODE_VER} 版本过低, 将安装 ${NODE_VERSION}.x"
-        fi
-    fi
-
-    # 确定平台对应的 Node.js 下载 URL
-    local NODE_DISTRO="linux"
-    local NODE_ARCH="x64"
-    case "${ARCH}" in
-        x86_64|amd64) NODE_ARCH="x64" ;;
-        aarch64|arm64) NODE_ARCH="arm64" ;;
-        armv7l)        NODE_ARCH="armv7l" ;;
-        *)             fail "不支持的 CPU 架构: ${ARCH}"; return 1 ;;
-    esac
-
-    # Read the complete manifest to avoid a head/pipefail SIGPIPE failure.
-    local NODE_BASE="${NODE_DIST_URL:-https://nodejs.org/dist}"
-    local NODE_WORKDIR NODE_FULL_VERSION NODE_FILENAME NODE_CHECKSUM
-    NODE_WORKDIR="$(mktemp -d)"
-    if ! download_file "${NODE_BASE%/}/latest-v${NODE_VERSION}.x/SHASUMS256.txt" "${NODE_WORKDIR}/SHASUMS256.txt"; then
-        rm -rf "${NODE_WORKDIR}"
-        return 1
-    fi
-    NODE_FILENAME="$(awk -v suffix="-${NODE_DISTRO}-${NODE_ARCH}.tar.xz" 'index($2, suffix) && substr($2, length($2)-length(suffix)+1)==suffix {print $2; exit}' "${NODE_WORKDIR}/SHASUMS256.txt")"
-    if ! [[ "$NODE_FILENAME" =~ ^node-v[0-9]+\.[0-9]+\.[0-9]+-[a-z0-9]+-[a-z0-9]+\.tar\.xz$ ]]; then
-        fail "Node.js 下载清单无效或没有匹配的架构"
-        rm -rf "${NODE_WORKDIR}"
-        return 1
-    fi
-    NODE_FULL_VERSION="${NODE_FILENAME#node-v}"
-    NODE_FULL_VERSION="${NODE_FULL_VERSION%%-*}"
-    local NODE_URL="${NODE_BASE%/}/v${NODE_FULL_VERSION}/${NODE_FILENAME}"
-    local NODE_TARBALL="${NODE_WORKDIR}/${NODE_FILENAME}"
-    if download_file "${NODE_URL}" "${NODE_TARBALL}"; then
-        NODE_CHECKSUM="$(awk -v file="$NODE_FILENAME" '$2==file {print $1; exit}' "${NODE_WORKDIR}/SHASUMS256.txt")"
-        if ! (cd "$NODE_WORKDIR" && printf '%s  %s\n' "$NODE_CHECKSUM" "$NODE_FILENAME" | sha256sum -c -); then
-            fail "Node.js 校验失败"
-            rm -rf "${NODE_WORKDIR}"
-            return 1
-        fi
-        ok "下载完成"
-
-        info "解压到 ${NODE_INSTALL_PREFIX} ..."
-        tar -xJf "${NODE_TARBALL}" -C "${NODE_INSTALL_PREFIX}" --strip-components=1
-        rm -rf "${NODE_WORKDIR}"
-        configure_venv_toolchain
-
-        ok "Node.js $("${NODE_BIN}" --version 2>/dev/null)"
-        ok "npm $("${NPM_BIN}" --version 2>/dev/null)"
-        ok "Node.js 已安装到 venv: ${NODE_INSTALL_PREFIX}"
-    else
-        fail "Node.js 下载失败, 请检查网络"
-        warn "可通过 NODE_DIST_URL 设置可访问的下载源"
-        rm -rf "${NODE_WORKDIR}"
-        return 1
-    fi
+    # 导出 NODE_PATH 供后续步骤使用
+    NODE_BIN="$(conda run -n "${CONDA_ENV_NAME}" which node)"
+    NPM_BIN="$(conda run -n "${CONDA_ENV_NAME}" which npm)"
 }
 
 # ---- 3. Claude Code CLI 安装 ----
 install_claude_code() {
     step "3/9" "Claude Code CLI 安装"
-    configure_venv_toolchain
-    local CLAUDE_BIN="${NODE_INSTALL_PREFIX}/bin/claude"
 
-    if [ -x "${CLAUDE_BIN}" ]; then
-        ok "claude 已安装: $("${CLAUDE_BIN}" --version 2>/dev/null || echo 'version check skipped')"
+    if command -v claude &>/dev/null; then
+        ok "claude 已安装: $(claude --version 2>/dev/null || echo 'version check skipped')"
     else
-        info "通过 venv npm 安装 @anthropic-ai/claude-code ..."
-        npm_install_global @anthropic-ai/claude-code
+        info "通过 npm 安装 @anthropic-ai/claude-code ..."
+        npm_install_with_retry @anthropic-ai/claude-code conda run -n "${CONDA_ENV_NAME}" npm
         ok "Claude Code CLI 安装完成"
     fi
 
     # 确认
-    CLAUDE_PATH="${CLAUDE_BIN}"
-    if [ -x "${CLAUDE_PATH}" ]; then
+    CLAUDE_PATH="$(conda run -n "${CONDA_ENV_NAME}" which claude 2>/dev/null || echo '')"
+    if [ -n "${CLAUDE_PATH}" ]; then
         ok "claude 路径: ${CLAUDE_PATH}"
     else
         warn "未能检测到 claude 命令, 可能需要重启终端或手动加入 PATH"
@@ -377,30 +217,25 @@ install_claude_code() {
 # ---- 4. Codex CLI 安装 ----
 install_codex_cli() {
     step "4/9" "Codex CLI 安装"
-    configure_venv_toolchain
-    local CODEX_BIN="${NODE_INSTALL_PREFIX}/bin/codex"
 
-    if [ -x "${CODEX_BIN}" ]; then
-        ok "codex 已安装: $("${CODEX_BIN}" --version 2>/dev/null || echo 'version check skipped')"
+    if conda run -n "${CONDA_ENV_NAME}" which codex &>/dev/null; then
+        ok "codex 已安装: $(conda run -n "${CONDA_ENV_NAME}" codex --version 2>/dev/null || echo 'version check skipped')"
     else
-        info "通过 venv npm 安装 @openai/codex ..."
-        npm_install_global @openai/codex
+        info "通过 npm 安装 @openai/codex ..."
+        npm_install_with_retry @openai/codex conda run -n "${CONDA_ENV_NAME}" npm
         ok "Codex CLI 安装完成"
     fi
 
-    CODEX_PATH="${CODEX_BIN}"
-    if [ -x "${CODEX_PATH}" ]; then
+    CODEX_PATH="$(conda run -n "${CONDA_ENV_NAME}" which codex 2>/dev/null || echo '')"
+    if [ -n "${CODEX_PATH}" ]; then
         ok "codex 路径: ${CODEX_PATH}"
     else
         warn "未能检测到 codex 命令, 可能需要重启终端或手动加入 PATH"
     fi
 }
-
 # ---- 6. GitHub 认证配置 ----
 setup_github_auth() {
     step "6/9" "GitHub 认证配置 (git + gh CLI + SSH)"
-    configure_venv_toolchain
-    local GH_BIN="${NODE_INSTALL_PREFIX}/bin/gh"
 
     # 修复 git 安全目录问题 (常见于 root/sudo 场景)
     info "配置 git 安全目录..."
@@ -408,41 +243,15 @@ setup_github_auth() {
     git config --global --add safe.directory "${HOME}" 2>/dev/null || true
     ok "git safe.directory 已配置"
 
-    # 安装 GitHub CLI (直接下载二进制, 不依赖 conda)
-    if [ -x "${GH_BIN}" ]; then
-        ok "gh CLI 已安装: $("${GH_BIN}" --version 2>/dev/null | head -1)"
+    # 安装 GitHub CLI
+    if command -v gh &>/dev/null; then
+        ok "gh CLI 已安装: $(gh --version 2>/dev/null | head -1)"
     else
-        info "安装 GitHub CLI (gh)..."
-        local GH_INSTALLED=false
-
-        # 尝试方式 1: 从 GitHub releases 下载预编译二进制
-        local GH_VERSION="2.68.1"
-        local GH_ARCH="amd64"
-        case "${ARCH}" in
-            aarch64|arm64) GH_ARCH="arm64" ;;
-        esac
-
-        if [ "${OS}" = "Linux" ]; then
-            local GH_URL="https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${GH_ARCH}.tar.gz"
-            local GH_TARBALL="/tmp/gh.tar.gz"
-            local GH_TMPDIR="/tmp/gh_extract"
-
-            if download_github_file "${GH_URL}" "${GH_TARBALL}" "gh CLI ${GH_VERSION}"; then
-                mkdir -p "${GH_TMPDIR}"
-                tar -xzf "${GH_TARBALL}" -C "${GH_TMPDIR}" --strip-components=1
-
-                mkdir -p "${NODE_INSTALL_PREFIX}/bin"
-                cp "${GH_TMPDIR}/bin/gh" "${GH_BIN}"
-                chmod +x "${GH_BIN}"
-                configure_venv_toolchain
-                rm -rf "${GH_TARBALL}" "${GH_TMPDIR}"
-                GH_INSTALLED=true
-                ok "gh CLI 安装完成: $("${GH_BIN}" --version 2>/dev/null | head -1)"
-            fi
-        fi
-
-        if [ "${GH_INSTALLED}" = false ]; then
-            warn "gh CLI 安装失败, 请手动安装到 ${NODE_INSTALL_PREFIX}/bin/gh: https://github.com/cli/cli/releases"
+        info "在 '${CONDA_ENV_NAME}' 环境中安装 GitHub CLI (gh)..."
+        if conda install -n "${CONDA_ENV_NAME}" gh -c conda-forge -y; then
+            ok "gh CLI 安装完成: $(conda run -n "${CONDA_ENV_NAME}" gh --version 2>/dev/null | head -1)"
+        else
+            warn "gh CLI 安装失败, 请手动安装: https://github.com/cli/cli"
         fi
     fi
 
@@ -466,8 +275,10 @@ setup_github_auth() {
     # 方式 1: 环境变量 GITHUB_TOKEN / GH_TOKEN (优先, 无需交互)
     if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "your-github-token-here" ]; then
         info "检测到 GITHUB_TOKEN, 配置 gh CLI..."
+        # 设置 GH_TOKEN (gh CLI 也认这个)
         export GH_TOKEN="${GITHUB_TOKEN}"
-        if [ -x "${GH_BIN}" ] && echo "${GITHUB_TOKEN}" | "${GH_BIN}" auth login --with-token 2>/dev/null; then
+        # 用 token 登录 gh
+        if echo "${GITHUB_TOKEN}" | conda run -n "${CONDA_ENV_NAME}" gh auth login --with-token 2>/dev/null; then
             ok "GitHub 已通过 GITHUB_TOKEN 认证"
             USE_TOKEN=true
             AUTH_OK=true
@@ -482,7 +293,7 @@ setup_github_auth() {
         ok "git HTTPS credential 已配置"
     elif [ -n "${GH_TOKEN}" ] && [ "${GH_TOKEN}" != "your-github-token-here" ]; then
         export GITHUB_TOKEN="${GH_TOKEN}"
-        if [ -x "${GH_BIN}" ] && echo "${GH_TOKEN}" | "${GH_BIN}" auth login --with-token 2>/dev/null; then
+        if echo "${GH_TOKEN}" | conda run -n "${CONDA_ENV_NAME}" gh auth login --with-token 2>/dev/null; then
             ok "GitHub 已通过 GH_TOKEN 认证"
             USE_TOKEN=true
             AUTH_OK=true
@@ -492,7 +303,7 @@ setup_github_auth() {
 
     # 方式 2: gh CLI 已有认证
     if [ "${AUTH_OK}" = false ]; then
-        if [ -x "${GH_BIN}" ] && "${GH_BIN}" auth status 2>&1 | grep -q "Logged in"; then
+        if conda run -n "${CONDA_ENV_NAME}" gh auth status 2>&1 | grep -q "Logged in"; then
             ok "GitHub 已通过 gh CLI 认证"
             AUTH_OK=true
         fi
@@ -518,6 +329,7 @@ setup_github_auth() {
         echo -e "  选择一种方式完成认证:"
         echo ""
         echo -e "  ${CYAN}方式一 (推荐): gh CLI 浏览器 OAuth 登录${NC}"
+        echo -e "    conda activate ${CONDA_ENV_NAME}"
         echo -e "    gh auth login"
         echo ""
         echo -e "  ${CYAN}方式二: 设置 GITHUB_TOKEN 环境变量${NC}"
@@ -534,7 +346,7 @@ setup_github_auth() {
         read -r -p "  是否已经准备好认证? (y/n, 选 n 跳过): " AUTH_READY 2>/dev/null || AUTH_READY="n"
         if [ "${AUTH_READY}" = "y" ] || [ "${AUTH_READY}" = "Y" ]; then
             info "尝试 gh auth login..."
-            "${GH_BIN}" auth login || {
+            conda run -n "${CONDA_ENV_NAME}" gh auth login || {
                 warn "gh auth login 失败, 请稍后手动认证"
             }
         else
@@ -596,11 +408,6 @@ CLAUDE_CODE_SUBAGENT_MODEL=deepseek-v4-flash
 # 生成: https://github.com/settings/tokens → Generate new token (classic)
 # 权限: repo, workflow (根据需要勾选)
 GITHUB_TOKEN=your-github-token-here
-
-# ---- GitHub 下载代理 (可选) ----
-# 国内访问 GitHub 慢时可启用, 如 https://ghproxy.net 或 https://ghproxy.com
-# uv 版会用于 gh Release 下载
-# GITHUB_PROXY_URL=https://ghproxy.net
 
 # ---- Codex CLI (OpenAI) ----
 # 认证方式: "login" (浏览器OAuth登录) 或 "api_key"
@@ -668,7 +475,6 @@ load_env_vars() {
         set -a
         source "${ENV_FILE}"
         set +a
-        refresh_github_proxy_url
         ok "环境变量已加载"
 
         # 验证关键变量
@@ -693,10 +499,6 @@ load_env_vars() {
             export GH_TOKEN="${GITHUB_TOKEN}"
         else
             warn "GITHUB_TOKEN 未设置或仍是占位符 (git push 需要认证)"
-        fi
-
-        if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-            ok "GitHub 下载代理已配置: ${GITHUB_PROXY_URL}"
         fi
     else
         warn ".env 文件不存在, 跳过环境变量加载"
@@ -726,34 +528,25 @@ restore_config() {
         cp -v "${SCRIPT_DIR}/config/keybindings.json" "${CLAUDE_DIR}/" 2>&1
         ok "keybindings.json 已恢复"
     fi
+
 }
 
 # ---- 完成提示 ----
 print_summary() {
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║${NC}   ✓ 部署完成! (uv 版)                ${GREEN}║${NC}"
+    echo -e "${GREEN}║${NC}   ✓ 部署完成!                         ${GREEN}║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════╝${NC}"
     echo ""
 
     echo -e "  ${CYAN}环境概览:${NC}"
-    echo -e "    uv 版本:      $(uv --version 2>/dev/null || echo 'unknown')"
-    echo -e "    venv 目录:    ${VENV_DIR}"
-    echo -e "    CLI 目录:     ${NODE_INSTALL_PREFIX}/bin"
-    echo -e "    激活命令:      ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
-    echo -e "    Node.js:      $("${NODE_INSTALL_PREFIX}/bin/node" --version 2>/dev/null || echo 'unknown')"
-    echo -e "    npm:          $("${NODE_INSTALL_PREFIX}/bin/npm" --version 2>/dev/null || echo 'unknown')"
+    echo -e "    conda 环境:    ${CONDA_INSTALL_DIR}"
+    echo -e "    激活命令:      ${GREEN}conda activate ${CONDA_ENV_NAME}${NC}"
     echo -e "    Claude Code:   ${GREEN}claude${NC}"
     echo -e "    Codex CLI:     ${GREEN}codex${NC}"
     echo -e "    Antigravity:   ${GREEN}agy${NC} (~/.local/bin)"
     echo -e "    配置目录:      ${CLAUDE_DIR}"
     echo ""
-
-    if [ -d "${VENV_DIR}" ]; then
-        echo -e "  ${CYAN}提示:${NC} Claude Code / Codex 已安装到 venv 内, 激活后使用:"
-        echo -e "    ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
-        echo ""
-    fi
 
     if [ ! -f "${ENV_FILE}" ]; then
         echo -e "  ${YELLOW}⚠  别忘了配置 API key:${NC}"
@@ -763,8 +556,12 @@ print_summary() {
     fi
 
     echo -e "  ${CYAN}启动方式:${NC}"
-    echo -e "    ${GREEN}source ${VENV_DIR}/bin/activate${NC}"
+    echo -e "    conda activate ${CONDA_ENV_NAME}"
+    echo ""
+    echo -e "    ${GREEN}# Claude Code${NC}"
     echo -e "    claude"
+    echo ""
+    echo -e "    ${GREEN}# Codex CLI${NC}"
     echo -e "    codex"
     echo -e '    export PATH="$HOME/.local/bin:$PATH"'
     echo -e "    agy"
@@ -780,9 +577,6 @@ print_summary() {
     else
         echo -e "    GITHUB_TOKEN             = (未设置, git push 需要手动认证)"
     fi
-    if [ -n "${GITHUB_PROXY_URL:-}" ]; then
-        echo -e "    GITHUB_PROXY_URL         = ${GITHUB_PROXY_URL}"
-    fi
     echo ""
 }
 
@@ -791,12 +585,14 @@ print_summary() {
 # ============================================================
 main() {
     banner
-    preload_env_vars
+    if [ -f "${ENV_FILE}" ]; then
+        set -a
+        source "${ENV_FILE}"
+        set +a
+    fi
 
     check_system
-    install_uv
-    setup_venv
-    install_nodejs
+    install_conda
     install_claude_code
     install_codex_cli
     step "5/9" "Antigravity CLI 安装"
